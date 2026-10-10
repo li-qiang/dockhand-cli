@@ -1,0 +1,4 @@
+# `files` in package.json is the allowlist; this is only a second line of defence.
+test/
+.gitignore
+*.tgz

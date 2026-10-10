@@ -1,0 +1,59 @@
+{
+  "name": "dockhand-cli",
+  "version": "1.0.0",
+  "description": "Command-line client for the Dockhand API — every command is generated from the instance's OpenAPI document. Containers, images, volumes, networks, compose stacks, environments, backups, schedules.",
+  "keywords": [
+    "dockhand",
+    "docker",
+    "compose",
+    "cli",
+    "openapi",
+    "generated-client",
+    "container-management",
+    "hawser"
+  ],
+  "license": "MIT",
+  "author": "dockhand-cli contributors",
+  "type": "module",
+  "bin": {
+    "dockhand": "bin/dockhand.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/li-qiang/dockhand-cli.git"
+  },
+  "homepage": "https://github.com/li-qiang/dockhand-cli#readme",
+  "bugs": {
+    "url": "https://github.com/li-qiang/dockhand-cli/issues"
+  },
+  "exports": {
+    ".": "./bin/dockhand.js",
+    "./commands": "./src/commands.generated.json",
+    "./skill": "./skills/dockhand/SKILL.md"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/generate.mjs",
+    "skills/",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE",
+    "scripts/audit.mjs"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "generate:fetch": "node scripts/generate.mjs --fetch",
+    "audit": "node scripts/audit.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "verify": "npm run audit && node scripts/generate.mjs --check && npm test",
+    "dockhand": "node bin/dockhand.js",
+    "prepublishOnly": "npm run verify"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
