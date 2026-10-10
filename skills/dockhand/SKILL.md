@@ -149,7 +149,7 @@ cat payload.json | dockhand raw PUT /api/some/route --stdin
 
 | symptom | fix |
 |---|---|
-| `unknown command` / `unknown action` | run `dockhand help <group>`; the endpoint may be new — refresh with `dockhand-cli generate --fetch https://<host>/openapi.json` |
+| `unknown command` / `unknown action` | run `dockhand help <group>`; the endpoint may be new — refresh with `npx @qlee/dockhand-cli generate --fetch https://<host>/openapi.json` |
 | exit 2 | the message lists the valid flags or missing arguments |
 | exit 3 | run `dockhand login`, or set `DOCKHAND_TOKEN` |
 | exit 7 and no URL configured | `dockhand config set base-url https://<host>` |
@@ -158,5 +158,5 @@ cat payload.json | dockhand raw PUT /api/some/route --stdin
 Re-generate the command table against your own instance when the server upgrades:
 
 ```bash
-npx dockhand-cli generate --fetch https://dockhand.example.com/openapi.json
+npx @qlee/dockhand-cli generate --fetch https://dockhand.example.com/openapi.json
 ```

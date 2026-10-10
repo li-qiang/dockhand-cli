@@ -1,6 +1,6 @@
-# dockhand-cli
+# @qlee/dockhand-cli
 
-Dockhand API 的命令行客户端（npm 包名 `dockhand-cli`，可执行文件名 `dockhand`）。
+Dockhand API 的命令行客户端（npm 包名 `@qlee/dockhand-cli`，可执行文件名 `dockhand`）。
 366 条命令全部由 `api/openapi.json` 生成，零运行时依赖，只用 Node.js 内置模块。
 
 ```bash
@@ -13,8 +13,8 @@ dockhand raw GET /api/environments
 ## 安装
 
 ```bash
-npm install -g dockhand-cli      # 提供 dockhand 命令
-npx dockhand-cli environments list
+npm install -g @qlee/dockhand-cli   # 提供 dockhand 命令
+npx @qlee/dockhand-cli environments list
 ```
 
 需要 Node.js ≥ 18.17（推荐 20+）。从源码使用：`npm link`，或直接 `node bin/dockhand.js`。

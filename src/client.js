@@ -49,7 +49,7 @@ const STATUS_TEXT = {
 };
 
 export class Client {
-  constructor(settings, { userAgent = 'dockhand-cli' } = {}) {
+  constructor(settings, { userAgent = '@qlee/dockhand-cli' } = {}) {
     this.settings = settings;
     this.userAgent = userAgent;
   }

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本目录是 **Dockhand API 的命令行客户端**，以 npm 包 `dockhand-cli` 发布（可执行文件名
+本目录是 **Dockhand API 的命令行客户端**，以 npm 包 `@qlee/dockhand-cli` 发布（可执行文件名
 `dockhand`）。所有命令都由 `api/openapi.json`（某实例的 `/openapi.json` 快照）自动生成，
 运行时零第三方依赖，只用 Node.js 内置模块。
 
@@ -237,7 +237,7 @@ npm publish --access public
 - `package.json` 的 `files` 是白名单：`bin/ src/ api/openapi.json scripts/generate.mjs skills/ README.md AGENTS.md LICENSE`；
   `test/` 不进包（但要在仓库里）；`.npmignore` 只是第二道保险；
 - `bin/dockhand.js` 必须带 shebang 且为可执行（`chmod 755`），npm 安装时会自己置位；
-- `exports` 额外暴露了 `dockhand-cli/commands`（整张命令表）和 `dockhand-cli/skill`（skill 文件）；
+- `exports` 额外暴露了 `@qlee/dockhand-cli/commands`（整张命令表）和 `@qlee/dockhand-cli/skill`（skill 文件）；
 - `prepublishOnly` = `npm run verify`，保证发布出去的产物与 `api/openapi.json` 一致；
 - 发布前记得补上 `repository` / `homepage` / `bugs` 字段（当前留空，避免写错地址）；
 - 版本号用 `npm version <patch|minor|major>`，它同时打 git tag。

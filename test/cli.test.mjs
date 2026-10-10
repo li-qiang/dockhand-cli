@@ -9,6 +9,7 @@ import { CliError } from '../src/client.js';
 import { DEFAULTS, resolveSettings } from '../src/config.js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const table = loadTable();
 const base = { baseUrl: 'http://dockhand.test', timeout: 1000, color: false };
@@ -233,9 +234,15 @@ test('command words are found even behind global flags', () => {
 });
 
 test('base URL comes from flag, env or file — never from the binary', () => {
-  const previous = { url: process.env.DOCKHAND_URL, base: process.env.DOCKHAND_BASE_URL };
+  const previous = {
+    url: process.env.DOCKHAND_URL,
+    base: process.env.DOCKHAND_BASE_URL,
+    config: process.env.DOCKHAND_CONFIG,
+  };
   delete process.env.DOCKHAND_URL;
   delete process.env.DOCKHAND_BASE_URL;
+  // Isolate from the developer's real ~/.config/dockhand/config.json.
+  process.env.DOCKHAND_CONFIG = join(tmpdir(), 'dockhand-cli-test-absent-config.json');
 
   const flagMap = new Map([['base-url', ['https://from-flag.example.com/']]]);
   const fromFlag = resolveSettings(flagMap);
@@ -254,6 +261,8 @@ test('base URL comes from flag, env or file — never from the binary', () => {
 
   if (previous.url) process.env.DOCKHAND_URL = previous.url;
   if (previous.base) process.env.DOCKHAND_BASE_URL = previous.base;
+  if (previous.config) process.env.DOCKHAND_CONFIG = previous.config;
+  else delete process.env.DOCKHAND_CONFIG;
 });
 
 test('no development host is baked into the published sources', () => {

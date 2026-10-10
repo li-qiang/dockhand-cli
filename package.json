@@ -1,5 +1,5 @@
 {
-  "name": "dockhand-cli",
+  "name": "@qlee/dockhand-cli",
   "version": "1.0.0",
   "description": "Command-line client for the Dockhand API — every command is generated from the instance's OpenAPI document. Containers, images, volumes, networks, compose stacks, environments, backups, schedules.",
   "keywords": [
@@ -13,7 +13,7 @@
     "hawser"
   ],
   "license": "MIT",
-  "author": "dockhand-cli contributors",
+  "author": "@qlee/dockhand-cli contributors",
   "type": "module",
   "bin": {
     "dockhand": "bin/dockhand.js"
