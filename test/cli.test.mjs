@@ -9,6 +9,7 @@ import { CliError, Client } from '../src/client.js';
 import { DEFAULTS, resolveSettings, readInstances, redact } from '../src/config.js';
 import { runBuiltin } from '../src/builtins.js';
 import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -287,6 +288,91 @@ test('setCookieHeader falls back to get() when getSetCookie is unavailable', () 
   const legacy = { get: (name) => (name === 'set-cookie' ? 'dockhand_session=legacy' : null) };
   assert.deepEqual(client.setCookieHeader(legacy), ['dockhand_session=legacy']);
   assert.deepEqual(client.setCookieHeader(undefined), []);
+});
+
+test('network failures surface the underlying errno from error.cause', async () => {
+  // grab a guaranteed-closed loopback port (port 1 would be rejected as a "bad port")
+  const server = createServer();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  server.close();
+
+  const client = new Client({ baseUrl: `http://127.0.0.1:${port}`, timeout: 15000, color: false });
+  await assert.rejects(
+    () => client.request({ method: 'GET', path: '/api/health' }),
+    (error) => {
+      assert.match(error.message, /failed: fetch failed/);
+      assert.match(error.message, /\((ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT)[),]/);
+      assert.equal(error.exitCode, 7);
+      return true;
+    },
+  );
+});
+
+function fetchCauseError(code) {
+  const error = new TypeError('fetch failed');
+  error.cause = Object.assign(new Error(`connect ${code}`), { code });
+  return error;
+}
+
+test('transient connect errors are retried until they heal', async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls === 1) throw fetchCauseError('EHOSTUNREACH');
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    const client = new Client({ baseUrl: 'http://dockhand.test', timeout: 5000, color: false });
+    const result = await client.request({ method: 'GET', path: '/api/health' });
+    assert.equal(result.data.ok, true);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('non-retryable connect errors surface immediately', async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw fetchCauseError('EACCES');
+  };
+  try {
+    const client = new Client({ baseUrl: 'http://dockhand.test', timeout: 5000, color: false });
+    await assert.rejects(() => client.request({ method: 'GET', path: '/api/health' }));
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('retries give up after four attempts and keep the errno', async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw fetchCauseError('EHOSTUNREACH');
+  };
+  try {
+    const client = new Client({ baseUrl: 'http://dockhand.test', timeout: 10000, color: false });
+    await assert.rejects(
+      () => client.request({ method: 'GET', path: '/api/health' }),
+      (error) => {
+        assert.match(error.message, /\(EHOSTUNREACH\)/);
+        assert.equal(error.exitCode, 7);
+        return true;
+      },
+    );
+    assert.equal(calls, 4);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 // ---------------------------------------------------------------------------

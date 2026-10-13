@@ -48,10 +48,44 @@ const STATUS_TEXT = {
   504: 'Gateway Timeout',
 };
 
+// Connect-phase failures: the request never left the machine, so retrying is always safe.
+// These cover VPN/TUN route churn (EHOSTUNREACH), momentary Wi-Fi drops and slow ARP.
+const RETRYABLE_CONNECT_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTDOWN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
 export class Client {
   constructor(settings, { userAgent = '@qlee/dockhand-cli' } = {}) {
     this.settings = settings;
     this.userAgent = userAgent;
+  }
+
+  /** Retry connect-phase fetch failures a few times before giving up. */
+  async #fetchWithRetry(url, init) {
+    const backoffs = [400, 1000, 2500];
+    let lastError;
+    for (let attempt = 1; attempt <= backoffs.length + 1; attempt++) {
+      try {
+        return await fetch(url, init);
+      } catch (error) {
+        lastError = error;
+        const code = error?.cause?.code ?? error?.code;
+        if (attempt > backoffs.length || !RETRYABLE_CONNECT_CODES.has(code)) break;
+        if (this.settings.verbose) {
+          process.stderr.write(`retry ${attempt}/${backoffs.length} after ${code}\n`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, backoffs[attempt - 1]));
+      }
+    }
+    throw lastError;
   }
 
   buildUrl(path, query) {
@@ -112,7 +146,9 @@ export class Client {
     const failure = (error) => {
       const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
       const reason = timedOut ? `timed out after ${budget / 1000}s` : (error?.message ?? String(error));
-      return new CliError(`request to ${url.origin}${url.pathname} failed: ${reason}`, {
+      const causeText = causeTextOf(error);
+      const suffix = causeText ? ` (${causeText})` : '';
+      return new CliError(`request to ${url.origin}${url.pathname} failed: ${reason}${suffix}`, {
         exitCode: EXIT.NETWORK,
         cause: error,
       });
@@ -120,7 +156,7 @@ export class Client {
 
     let response;
     try {
-      response = await fetch(url, init);
+      response = await this.#fetchWithRetry(url, init);
     } catch (error) {
       const problem = failure(error);
       if (!this.settings.baseUrlConfigured && error?.name !== 'TimeoutError') {
@@ -212,6 +248,16 @@ export class Client {
     const single = headers?.get?.('set-cookie');
     return single ? [single] : [];
   }
+}
+
+/** undici wraps the real errno (ECONNREFUSED, ETIMEDOUT, …) in error.cause — surface it. */
+function causeTextOf(error) {
+  const cause = error?.cause;
+  if (!cause) return null;
+  if (Array.isArray(cause.errors) && cause.errors.length) {
+    return cause.errors.map((e) => e?.code ?? e?.message).filter(Boolean).join(', ');
+  }
+  return cause.code ?? (typeof cause.message === 'string' ? cause.message : null);
 }
 
 function formatHttpError(response, text) {

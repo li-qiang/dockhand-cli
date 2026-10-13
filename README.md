@@ -153,6 +153,10 @@ dockhand raw POST /api/new-route --data '{"a":1}'
 | 6 | 限流（429） |
 | 7 | 网络/超时 |
 
+连接阶段失败（ECONNREFUSED、EHOSTUNREACH 等）会在报错前自动重试 3 次；错误
+信息末尾附带真实 errno，如 `fetch failed (EHOSTUNREACH)`。`--verbose` 可看到
+每次重试。
+
 ## Shell 补全
 
 ```bash

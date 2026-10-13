@@ -128,6 +128,10 @@ to trim table columns and `--out-file <path>` for binary downloads.
 
 Parse JSON with `jq`; branch on the exit code rather than on message text.
 
+Connect-phase network failures (ECONNREFUSED, EHOSTUNREACH, …) are retried up to
+3 times automatically before exit 7; the error message ends with the underlying
+errno in parentheses, e.g. `fetch failed (EHOSTUNREACH)`.
+
 ## 6. Safety rules for agents
 
 - **Dry-run every write first.** `dockhand containers delete web -e 4 --dry-run`
