@@ -253,21 +253,34 @@ dockhand generate --fetch <url>           # 已安装的包里也能重新生成
 
 ## 8. 发布到 npm
 
+**硬性顺序：先 commit 并 push（含 tag），最后才 `npm publish`。** npm 上的每个版本
+必须能对应到 GitHub 上已推送的提交和 tag；发完版还有改动没提交/没推，仓库和
+registry 就对不上了。完整流程：
+
 ```bash
-npm run verify            # 生成器 --check + 测试；prepublishOnly 会自动执行
+git add -A && git commit -m "<message>"   # 1. 提交全部改动，不许带着脏工作区发版
+npm version <patch|minor|major>           # 2. 版本号 + 版本提交 + git tag
+git push origin master --follow-tags      # 3. 推送（含 tag），让远端先就位
+npm publish                               # 4. 最后发布；prepublishOnly 自动跑 verify
+```
+
+发布前的自检（可单独跑，`npm publish` 时也会自动执行）：
+
+```bash
+npm run verify            # 生成器 --check + 测试
 npm pack --dry-run        # 检查 tarball 内容
-npm publish --access public
 ```
 
 打包要点：
 
-- `package.json` 的 `files` 是白名单：`bin/ src/ api/openapi.json scripts/generate.mjs skills/ README.md AGENTS.md LICENSE`；
+- `package.json` 的 `files` 是白名单：`bin/ src/ api/openapi.json scripts/generate.mjs scripts/audit.mjs skills/ README.md AGENTS.md LICENSE`；
   `test/` 不进包（但要在仓库里）；`.npmignore` 只是第二道保险；
 - `bin/dockhand.js` 必须带 shebang 且为可执行（`chmod 755`），npm 安装时会自己置位；
 - `exports` 额外暴露了 `@qlee/dockhand-cli/commands`（整张命令表）和 `@qlee/dockhand-cli/skill`（skill 文件）；
 - `prepublishOnly` = `npm run verify`，保证发布出去的产物与 `api/openapi.json` 一致；
-- 发布前记得补上 `repository` / `homepage` / `bugs` 字段（当前留空，避免写错地址）；
-- 版本号用 `npm version <patch|minor|major>`，它同时打 git tag。
+- `repository` / `homepage` / `bugs` 已指向 GitHub 仓库，不要改动；
+- 版本号用 `npm version <patch|minor|major>`，它同时产生版本提交和 git tag——push 时用
+  `--follow-tags` 把 tag 一起推上去。
 
 ## 9. Agent Skill
 
