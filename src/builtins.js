@@ -10,7 +10,17 @@ import { fileURLToPath } from 'node:url';
 
 import { Client, CliError, EXIT } from './client.js';
 import { loadTable } from './commands.js';
-import { DEFAULTS, maskSecret, readConfig, redact, writeConfig, configPath } from './config.js';
+import {
+  DEFAULTS,
+  maskSecret,
+  normalizeBaseUrl,
+  readConfig,
+  readInstances,
+  redact,
+  writeConfig,
+  writeInstance,
+  configPath,
+} from './config.js';
 import { commandHelp, groupHelp, rootHelp } from './help.js';
 import { render } from './render.js';
 import { completionScript } from './completion.js';
@@ -38,6 +48,14 @@ export async function runBuiltin(command, ctx) {
       return configSet(ctx);
     case 'config.unset':
       return configUnset(ctx);
+    case 'config.instance.list':
+      return instanceList();
+    case 'config.instance.set':
+      return instanceSet(ctx);
+    case 'config.instance.show':
+      return instanceShow(ctx);
+    case 'config.instance.remove':
+      return instanceRemove(ctx);
     case 'completion':
       return completion(ctx);
     case 'spec.path':
@@ -217,8 +235,7 @@ async function login({ flags, settings }) {
     });
   }
 
-  const patch = { cookie: session };
-  const saved = writeConfig(patch);
+  const saved = saveCredentials(settings, { cookie: session });
 
   let tokenSaved = null;
   const tokenName = first(flags, 'save-token');
@@ -235,12 +252,14 @@ async function login({ flags, settings }) {
         exitCode: EXIT.ERROR,
       });
     }
-    writeConfig({ token });
+    saveCredentials(settings, { token });
     tokenSaved = { name: tokenName, token };
   }
 
+  const target = settings.instanceName ?? settings.instanceUnknown;
   const output = {
     success: true,
+    instance: target ?? null,
     user: result.data?.user ?? null,
     configFile: saved.path,
     cookie: maskSecret(session),
@@ -248,8 +267,33 @@ async function login({ flags, settings }) {
   };
   console.log(JSON.stringify(output, null, 2));
   if (!settings.quiet) {
-    process.stderr.write(`credentials stored in ${saved.path}\n`);
+    process.stderr.write(
+      `credentials for ${target ? `instance "${target}" ` : ''}stored in ${saved.path}\n`,
+    );
   }
+}
+
+/**
+ * Store login credentials either at the top level (no instance involved) or
+ * inside the named instance's entry. When a new instance gets its first
+ * credentials, its base URL is recorded too — otherwise the entry could never
+ * be matched by `--base-url` later.
+ */
+function saveCredentials(settings, patch) {
+  const target = settings.instanceName ?? settings.instanceUnknown;
+  if (!target) return writeConfig(patch);
+  const existing = readInstances()[target] ?? {};
+  const entry = { ...patch };
+  if (!existing.baseUrl && !entry.baseUrl) {
+    if (!settings.baseUrlConfigured) {
+      throw new CliError(
+        `instance "${target}" has no base URL yet; pass --base-url <url> so the credentials can be linked to it`,
+        { exitCode: EXIT.USAGE },
+      );
+    }
+    entry.baseUrl = settings.baseUrl;
+  }
+  return writeInstance(target, entry);
 }
 
 async function logout({ settings }) {
@@ -259,6 +303,16 @@ async function logout({ settings }) {
   } catch {
     // Logging out locally matters more than the server acknowledging it.
   }
+  if (settings.instanceName) {
+    const { path } = writeInstance(settings.instanceName, { cookie: null, token: null });
+    console.log(JSON.stringify({
+      success: true,
+      instance: settings.instanceName,
+      cleared: ['cookie', 'token'],
+      configFile: path,
+    }, null, 2));
+    return;
+  }
   const { path } = writeConfig({ cookie: null, token: null });
   console.log(JSON.stringify({ success: true, cleared: ['cookie', 'token'], configFile: path }, null, 2));
 }
@@ -266,6 +320,7 @@ async function logout({ settings }) {
 function configShow({ settings }) {
   console.log(JSON.stringify({
     baseUrl: settings.baseUrl,
+    instance: settings.instanceName,
     output: settings.output,
     timeout: settings.timeout,
     token: settings.token ? maskSecret(settings.token) : null,
@@ -276,8 +331,89 @@ function configShow({ settings }) {
       DOCKHAND_URL: process.env.DOCKHAND_URL ?? null,
       DOCKHAND_TOKEN: process.env.DOCKHAND_TOKEN ? maskSecret(process.env.DOCKHAND_TOKEN) : null,
       DOCKHAND_CONFIG: process.env.DOCKHAND_CONFIG ?? null,
+      DOCKHAND_INSTANCE: process.env.DOCKHAND_INSTANCE ?? null,
     },
   }, null, 2));
+}
+
+const INSTANCE_KEYS = {
+  'base-url': 'baseUrl',
+  baseurl: 'baseUrl',
+  url: 'baseUrl',
+  token: 'token',
+  cookie: 'cookie',
+};
+
+function instanceList() {
+  const instances = readInstances();
+  const file = readConfig();
+  const defaultUrl = file.baseUrl ? normalizeBaseUrl(file.baseUrl) : null;
+  const list = Object.entries(instances).map(([name, entry]) => ({
+    name,
+    baseUrl: entry.baseUrl ?? null,
+    token: entry.token ? maskSecret(entry.token) : null,
+    cookie: entry.cookie ? maskSecret(entry.cookie) : null,
+    default: Boolean(defaultUrl && entry.baseUrl && normalizeBaseUrl(entry.baseUrl) === defaultUrl),
+  }));
+  console.log(JSON.stringify(list, null, 2));
+}
+
+function requireInstance(name) {
+  const entry = readInstances()[String(name ?? '')];
+  if (!entry) {
+    const known = Object.keys(readInstances());
+    throw new CliError(
+      `unknown instance "${name ?? ''}"`
+        + (known.length ? `\n  configured instances: ${known.join(', ')}` : '\n  no instances configured yet'),
+      { exitCode: EXIT.USAGE },
+    );
+  }
+  return entry;
+}
+
+function instanceSet({ positionals }) {
+  const [name, rawKey, ...rest] = positionals;
+  if (!name || !rawKey) {
+    throw new CliError(
+      'usage: dockhand config instance set <name> <base-url|token|cookie> <value>\n'
+      + '  example: dockhand config instance set prod base-url https://dockhand.example.com',
+      { exitCode: EXIT.USAGE },
+    );
+  }
+  const key = INSTANCE_KEYS[String(rawKey).toLowerCase()];
+  if (!key) {
+    throw new CliError(
+      `unknown config key "${rawKey}"\n`
+      + '  usage: dockhand config instance set <name> <base-url|token|cookie> <value>',
+      { exitCode: EXIT.USAGE },
+    );
+  }
+  const value = rest.join(' ');
+  if (!value) {
+    throw new CliError(`missing value for \`dockhand config instance set ${name} ${rawKey}\``, {
+      exitCode: EXIT.USAGE,
+    });
+  }
+  const { path } = writeInstance(String(name), { [key]: value });
+  console.log(`${name}.${key} = ${key === 'token' || key === 'cookie' ? maskSecret(value) : value}  (${path})`);
+}
+
+function instanceShow({ positionals }) {
+  const name = positionals[0];
+  const entry = requireInstance(name);
+  console.log(JSON.stringify({
+    name,
+    baseUrl: entry.baseUrl ?? null,
+    token: entry.token ? maskSecret(entry.token) : null,
+    cookie: entry.cookie ? maskSecret(entry.cookie) : null,
+  }, null, 2));
+}
+
+function instanceRemove({ positionals }) {
+  const name = positionals[0];
+  requireInstance(name);
+  const { path } = writeInstance(String(name), null);
+  console.log(`removed instance "${name}" (${path})`);
 }
 
 const CONFIG_KEYS = {

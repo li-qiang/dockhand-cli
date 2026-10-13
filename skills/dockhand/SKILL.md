@@ -21,7 +21,22 @@ export DOCKHAND_URL=https://dockhand.example.com
 dockhand --base-url https://dockhand.example.com environments list
 ```
 
-`--base-url` > `DOCKHAND_URL` > config file > `http://localhost:3000` (local dev only).
+Precedence: flag > selected instance > `DOCKHAND_URL` > config file > `http://localhost:3000` (local dev only).
+
+### Multiple Dockhand servers
+
+Each server can be pre-configured as a named instance with its own URL and
+credentials, so switching needs no flags per call:
+
+```bash
+dockhand config instance set prod base-url https://prod.example.com
+dockhand config instance set prod token dh_...        # credentials stored once
+dockhand config instance list                          # all instances, secrets redacted
+dockhand containers list                               # default instance
+dockhand -i prod containers list                       # --instance prod applies its token
+dockhand --base-url https://prod.example.com stacks ls # a configured URL also pulls its token
+export DOCKHAND_INSTANCE=prod                          # or switch per shell
+```
 
 ## 2. Authenticate
 
@@ -30,10 +45,13 @@ Authentication is only required when the instance has auth enabled.
 ```bash
 dockhand login --username admin --password "$PASSWORD"   # stores the session cookie
 dockhand login --username admin --password "$PASSWORD" --save-token ci
+dockhand login --instance prod --username admin --password "$PASSWORD"   # into that instance
 export DOCKHAND_TOKEN=dh_...                             # preferred in CI
 ```
 
-Credentials live in `~/.config/dockhand/config.json` (mode 0600).
+Credentials live in `~/.config/dockhand/config.json` (mode 0600); instance
+credentials live in the `instances` section of the same file. `dockhand logout`
+clears the default credentials, or the named instance with `--instance prod`.
 
 ## 3. Command model
 

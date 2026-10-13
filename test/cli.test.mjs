@@ -6,8 +6,9 @@ import { loadTable, resolveCommand } from '../src/commands.js';
 import { buildRequest, commandWords } from '../src/cli.js';
 import { render } from '../src/render.js';
 import { CliError } from '../src/client.js';
-import { DEFAULTS, resolveSettings } from '../src/config.js';
-import { readFileSync, readdirSync } from 'node:fs';
+import { DEFAULTS, resolveSettings, readInstances, redact } from '../src/config.js';
+import { runBuiltin } from '../src/builtins.js';
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -231,6 +232,9 @@ test('command words are found even behind global flags', () => {
   assert.deepEqual(commandWords(['--help']).map((w) => w.token), []);
   // A bare flag does not swallow the command word that follows it.
   assert.deepEqual(commandWords(['--quiet', 'changelog']).map((w) => w.token), ['changelog']);
+  // --instance / -i carry a value that must not be mistaken for a command word.
+  assert.deepEqual(commandWords(['--instance', 'prod', 'containers', 'list']).map((w) => w.token), ['containers', 'list']);
+  assert.deepEqual(commandWords(['-i', 'prod', 'containers', 'list']).map((w) => w.token), ['containers', 'list']);
 });
 
 test('base URL comes from flag, env or file — never from the binary', () => {
@@ -263,6 +267,170 @@ test('base URL comes from flag, env or file — never from the binary', () => {
   if (previous.base) process.env.DOCKHAND_BASE_URL = previous.base;
   if (previous.config) process.env.DOCKHAND_CONFIG = previous.config;
   else delete process.env.DOCKHAND_CONFIG;
+});
+
+// ---------------------------------------------------------------------------
+// named instances (multiple Dockhand servers)
+// ---------------------------------------------------------------------------
+
+function withTempConfig(config, run) {
+  const dir = mkdtempSync(join(tmpdir(), 'dockhand-cli-test-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify(config));
+  const previous = {
+    config: process.env.DOCKHAND_CONFIG,
+    url: process.env.DOCKHAND_URL,
+    base: process.env.DOCKHAND_BASE_URL,
+    instance: process.env.DOCKHAND_INSTANCE,
+    token: process.env.DOCKHAND_TOKEN,
+    cookie: process.env.DOCKHAND_COOKIE,
+  };
+  process.env.DOCKHAND_CONFIG = path;
+  delete process.env.DOCKHAND_URL;
+  delete process.env.DOCKHAND_BASE_URL;
+  delete process.env.DOCKHAND_INSTANCE;
+  delete process.env.DOCKHAND_TOKEN;
+  delete process.env.DOCKHAND_COOKIE;
+  try {
+    return run(path);
+  } finally {
+    if (previous.config) process.env.DOCKHAND_CONFIG = previous.config;
+    else delete process.env.DOCKHAND_CONFIG;
+    if (previous.url) process.env.DOCKHAND_URL = previous.url;
+    if (previous.base) process.env.DOCKHAND_BASE_URL = previous.base;
+    if (previous.instance) process.env.DOCKHAND_INSTANCE = previous.instance;
+    if (previous.token) process.env.DOCKHAND_TOKEN = previous.token;
+    if (previous.cookie) process.env.DOCKHAND_COOKIE = previous.cookie;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const MULTI_CONFIG = {
+  baseUrl: 'https://default.example.com',
+  token: 'dh_default',
+  instances: {
+    prod: { baseUrl: 'https://prod.example.com', token: 'dh_prod' },
+    lab: { baseUrl: 'https://lab.example.com/', token: 'dh_lab', cookie: 'dockhand_session=abc' },
+  },
+};
+
+test('named instances resolve url and pre-configured credentials', () => {
+  withTempConfig(MULTI_CONFIG, () => {
+    // Without a selector the top-level default applies, top-level token included.
+    const fallback = resolveSettings(new Map());
+    assert.equal(fallback.baseUrl, 'https://default.example.com');
+    assert.equal(fallback.token, 'dh_default');
+    assert.equal(fallback.instanceName, null);
+
+    // --instance swaps url + credentials in one move.
+    const prod = resolveSettings(new Map([['instance', ['prod']]]));
+    assert.equal(prod.baseUrl, 'https://prod.example.com');
+    assert.equal(prod.token, 'dh_prod');
+    assert.equal(prod.instanceName, 'prod');
+    assert.equal(prod.baseUrlConfigured, true);
+
+    // -i is the shorthand; a trailing slash on the stored url is normalised.
+    const parsed = parseArgs(['-i', 'lab', 'containers', 'list']);
+    const lab = resolveSettings(parsed.flags);
+    assert.equal(lab.baseUrl, 'https://lab.example.com');
+    assert.equal(lab.token, 'dh_lab');
+    assert.equal(lab.cookie, 'dockhand_session=abc');
+
+    // An explicit flag still beats the selected instance.
+    const override = resolveSettings(new Map([['instance', ['prod']], ['token', ['dh_override']]]));
+    assert.equal(override.token, 'dh_override');
+
+    // A selected instance beats ambient env so identities never mix.
+    process.env.DOCKHAND_TOKEN = 'dh_ambient';
+    const guarded = resolveSettings(new Map([['instance', ['prod']]]));
+    assert.equal(guarded.token, 'dh_prod');
+    delete process.env.DOCKHAND_TOKEN;
+  });
+});
+
+test('a configured base url pulls in its instance credentials automatically', () => {
+  withTempConfig(MULTI_CONFIG, () => {
+    // --base-url matching an entry applies that entry's token.
+    const byFlag = resolveSettings(new Map([['base-url', ['https://prod.example.com/']]]));
+    assert.equal(byFlag.baseUrl, 'https://prod.example.com');
+    assert.equal(byFlag.token, 'dh_prod');
+    assert.equal(byFlag.instanceName, 'prod');
+
+    // The same match works through the environment variable.
+    process.env.DOCKHAND_URL = 'https://lab.example.com';
+    const byEnv = resolveSettings(new Map());
+    assert.equal(byEnv.baseUrl, 'https://lab.example.com');
+    assert.equal(byEnv.token, 'dh_lab');
+    delete process.env.DOCKHAND_URL;
+
+    // No match: credentials fall back to the env/top-level chain.
+    process.env.DOCKHAND_URL = 'https://other.example.com';
+    process.env.DOCKHAND_TOKEN = 'dh_ambient';
+    const unmatched = resolveSettings(new Map());
+    assert.equal(unmatched.token, 'dh_ambient');
+    assert.equal(unmatched.instanceName, null);
+    delete process.env.DOCKHAND_URL;
+    delete process.env.DOCKHAND_TOKEN;
+
+    // DOCKHAND_INSTANCE behaves like --instance.
+    process.env.DOCKHAND_INSTANCE = 'prod';
+    assert.equal(resolveSettings(new Map()).token, 'dh_prod');
+    delete process.env.DOCKHAND_INSTANCE;
+
+    // Unknown names are surfaced for the caller instead of thrown, so
+    // `help`/`completion` keep working; non-login commands reject it later.
+    const unknown = resolveSettings(new Map([['instance', ['nope']]]));
+    assert.equal(unknown.instanceUnknown, 'nope');
+    assert.equal(unknown.instanceName, null);
+  });
+});
+
+test('redaction covers secrets inside instance entries', () => {
+  const masked = redact({
+    token: 'dh_topsecretvalue',
+    instances: { prod: { baseUrl: 'https://prod.example.com', token: 'dh_prodsecretvalue' } },
+  });
+  assert.ok(!masked.token.includes('topsecret'));
+  assert.equal(masked.instances.prod.baseUrl, 'https://prod.example.com');
+  assert.ok(!masked.instances.prod.token.includes('prodsecret'));
+  assert.ok(masked.instances.prod.token.includes('…'));
+});
+
+test('config instance builtins round-trip through the config file', () => {
+  withTempConfig({ baseUrl: 'https://default.example.com' }, (path) => {
+    const command = (name) => resolveCommand(table, name.split(' ')).command;
+    const ctx = (positionals) => ({
+      table,
+      positionals,
+      flags: new Map(),
+      passthrough: [],
+      settings: resolveSettings(),
+    });
+    const seen = [];
+    const log = console.log;
+    console.log = (line) => seen.push(String(line));
+    try {
+      runBuiltin(command('config instance set'), ctx(['prod', 'base-url', 'https://prod.example.com']));
+      runBuiltin(command('config instance set'), ctx(['prod', 'token', 'dh_prod']));
+      runBuiltin(command('config instance set'), ctx(['lab', 'base-url', 'https://lab.example.com']));
+      runBuiltin(command('config instance show'), ctx(['prod']));
+      runBuiltin(command('config instance list'), ctx([]));
+      runBuiltin(command('config instance remove'), ctx(['lab']));
+    } finally {
+      console.log = log;
+    }
+    const instances = readInstances();
+    assert.deepEqual(Object.keys(instances), ['prod']);
+    assert.equal(instances.prod.baseUrl, 'https://prod.example.com');
+    assert.equal(instances.prod.token, 'dh_prod');
+    const printed = seen.join('\n');
+    assert.ok(printed.includes('prod.baseUrl = https://prod.example.com'));
+    assert.ok(printed.includes('"name": "prod"'));
+    assert.ok(!printed.includes('dh_prod'));
+    const finalConfig = readFileSync(path, 'utf8');
+    assert.match(finalConfig, /"instances"/);
+    assert.ok(!finalConfig.includes('lab.example.com'), 'removed instance disappears from the config file');
+  });
 });
 
 test('no development host is baked into the published sources', () => {

@@ -39,13 +39,13 @@ dockhand config set base-url https://dockhand.example.com   # 首次配置
 ├── skills/dockhand/SKILL.md      # 随包发布的 agent skill（`dockhand skill` 会打印它）
 ├── LICENSE                       # MIT
 ├── src/
-│   ├── commands.generated.json  # 生成产物：命令表（366 条命令 + 12 条内置命令）
+│   ├── commands.generated.json  # 生成产物：命令表（366 条命令 + 18 条内置命令）
 │   ├── cli.js                    # 解析 argv、构造请求、渲染输出、错误码
 │   ├── commands.js               # 命令名/别名解析（最长前缀匹配）
 │   ├── builtins.js               # login/logout/config/completion/spec/raw/help/version
 │   ├── args.js                   # flag 解析器（--x=y、--no-x、可重复、`--`）
 │   ├── client.js                 # HTTP 层：认证、超时、SSE、二进制、退出码
-│   ├── config.js                 # flag > env > 配置文件 > 默认值 的解析顺序
+│   ├── config.js                 # flag > 命名实例 > env > 配置文件 > 默认值 的解析顺序
 │   ├── help.js                   # 三级帮助（根 / 组 / 单命令）
 │   ├── render.js                 # json / ndjson / table / raw / auto
 │   └── completion.js             # bash / zsh / fish 补全脚本生成
@@ -106,12 +106,14 @@ dockhand stacks deploys immich 42            →  GET /api/stacks/immich/deploys
 
 ### 4.1 参数来源与优先级
 
-`flag > 环境变量 > 配置文件 (~/.config/dockhand/config.json) > 默认值`
+`flag > 命名实例 > 环境变量 > 配置文件顶层 > 默认值`
+（配置文件在 `~/.config/dockhand/config.json`；命名实例见 §5）
 
 | 环境变量 | 作用 |
 |---|---|
 | `DOCKHAND_URL` | base URL |
 | `DOCKHAND_TOKEN` | API token（`Authorization: Bearer …`） |
+| `DOCKHAND_INSTANCE` | 选用命名实例（等价 `--instance`） |
 | `DOCKHAND_CONFIG` | 配置文件路径 |
 | `DOCKHAND_OUTPUT` | 默认输出格式 |
 | `DOCKHAND_TIMEOUT` | 超时毫秒 |
@@ -168,6 +170,31 @@ dockhand logout
 - 也可以只用环境变量 `DOCKHAND_TOKEN`，适合 CI。
 - 写操作前建议先 `dockhand <cmd> --dry-run` 确认将要发出的请求。
 - 401/403 退出码为 3，429 为 6，详见 `src/client.js` 的 `EXIT`。
+
+### 5.1 多实例（多个 Dockhand 服务）
+
+配置文件里的 `instances` 段为每台服务保存独立的 URL 和凭据：
+
+```json
+{ "baseUrl": "https://default.example.com", "token": "dh_default",
+  "instances": { "prod": { "baseUrl": "https://prod.example.com", "token": "dh_prod" } } }
+```
+
+```bash
+dockhand config instance set prod base-url https://prod.example.com
+dockhand config instance set prod token dh_xxx
+dockhand config instance list                  # 清单（密钥打码）
+dockhand config instance show prod / ... remove prod
+dockhand -i prod containers list               # --instance / DOCKHAND_INSTANCE 选用
+dockhand --base-url https://prod.example.com containers list   # URL 命中实例 → 自动套用其凭据
+dockhand login --instance prod --username admin --password "$PASS"   # 凭据直接存入该实例
+dockhand logout --instance prod                # 只清该实例
+```
+
+实现要点（`src/config.js`）：解析时先选出实例（`--instance`/`DOCKHAND_INSTANCE`），
+未命名时按最终 baseUrl 归一化匹配实例条目；凭据链为
+`flag > 实例条目 > 环境变量 > 配置文件顶层`。未知实例名不抛错，记入
+`settings.instanceUnknown`，由 `src/cli.js` 统一拦截（`login` 例外，视为要创建的新实例）。
 
 ---
 

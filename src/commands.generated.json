@@ -8067,6 +8067,103 @@
       "aliases": []
     },
     {
+      "name": "config instance list",
+      "group": "_meta",
+      "tokens": [
+        "config"
+      ],
+      "verb": null,
+      "method": null,
+      "args": [],
+      "paths": [],
+      "summary": "List the named instances configured in the config file (secrets redacted)",
+      "builtin": "config.instance.list",
+      "query": [],
+      "body": null,
+      "aliases": []
+    },
+    {
+      "name": "config instance remove",
+      "group": "_meta",
+      "tokens": [
+        "config"
+      ],
+      "verb": null,
+      "method": null,
+      "args": [
+        {
+          "name": "name",
+          "arg": "name",
+          "required": true,
+          "description": "Instance name"
+        }
+      ],
+      "paths": [],
+      "summary": "Remove a named instance from the config file",
+      "builtin": "config.instance.remove",
+      "query": [],
+      "body": null,
+      "aliases": []
+    },
+    {
+      "name": "config instance set",
+      "group": "_meta",
+      "tokens": [
+        "config"
+      ],
+      "verb": null,
+      "method": null,
+      "args": [
+        {
+          "name": "name",
+          "arg": "name",
+          "required": true,
+          "description": "Instance name to select with --instance"
+        },
+        {
+          "name": "key",
+          "arg": "key",
+          "required": true,
+          "description": "base-url | token | cookie"
+        },
+        {
+          "name": "value",
+          "arg": "value",
+          "required": true,
+          "description": "Value to store"
+        }
+      ],
+      "paths": [],
+      "summary": "Configure a named instance: base-url, token or cookie — then select it with --instance <name>",
+      "builtin": "config.instance.set",
+      "query": [],
+      "body": null,
+      "aliases": []
+    },
+    {
+      "name": "config instance show",
+      "group": "_meta",
+      "tokens": [
+        "config"
+      ],
+      "verb": null,
+      "method": null,
+      "args": [
+        {
+          "name": "name",
+          "arg": "name",
+          "required": true,
+          "description": "Instance name"
+        }
+      ],
+      "paths": [],
+      "summary": "Show one named instance with secrets redacted",
+      "builtin": "config.instance.show",
+      "query": [],
+      "body": null,
+      "aliases": []
+    },
+    {
       "name": "config path",
       "group": "_meta",
       "tokens": [

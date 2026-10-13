@@ -8,14 +8,14 @@ import { resolve as resolvePath } from 'node:path';
 import { parseArgs, BOOLEAN_GLOBAL_FLAGS, SHORT_FLAGS } from './args.js';
 import { loadTable, resolveCommand } from './commands.js';
 import { CliError, Client, EXIT } from './client.js';
-import { resolveSettings } from './config.js';
+import { resolveSettings, readInstances } from './config.js';
 import { commandHelp, groupHelp, rootHelp, setColor, unknownCommandHelp, usageFor } from './help.js';
 import { render } from './render.js';
 import { runBuiltin } from './builtins.js';
 
 /** Flags consumed by the CLI itself; everything else belongs to the endpoint. */
 const RESERVED_FLAGS = new Set([
-  'base-url', 'url', 'token', 'cookie', 'output', 'verbose', 'quiet', 'timeout',
+  'base-url', 'url', 'token', 'cookie', 'instance', 'output', 'verbose', 'quiet', 'timeout',
   'no-color', 'pretty', 'help', 'version', 'dry-run', 'public', 'stdin',
   'confirm', 'out-file', 'accept', 'fields',
 ]);
@@ -104,6 +104,19 @@ async function run(argv) {
   if (lastFlag(flags, 'help') === true) {
     console.log(commandHelp(table, command));
     return;
+  }
+
+  // `login` is allowed to name an instance that does not exist yet (it creates
+  // the entry); everything else fails fast instead of hitting the wrong server.
+  if (settings.instanceUnknown && command.builtin !== 'login') {
+    const known = Object.keys(readInstances());
+    throw new CliError(
+      `unknown instance "${settings.instanceUnknown}"`
+        + (known.length
+          ? `\n  configured instances: ${known.join(', ')}`
+          : '\n  no instances configured yet — see `dockhand config instance set <name> base-url <url>`'),
+      { exitCode: EXIT.USAGE },
+    );
   }
 
   if (command.builtin) {

@@ -30,8 +30,31 @@ dockhand --base-url https://dockhand.example.com environments list   # 单次覆
 dockhand config show                                 # 密码类字段自动打码
 ```
 
-解析顺序：`--base-url` > `DOCKHAND_URL` > 配置文件 > `http://localhost:3000`（仅本机开发）。
+解析顺序：flag > 已选实例 > `DOCKHAND_URL` > 配置文件顶层 > `http://localhost:3000`（仅本机开发）。
 凭据存放在 `~/.config/dockhand/config.json`（权限 0600）。
+
+## 多实例
+
+管理多台 Dockhand 时，把每台配成命名实例（各自的 URL + 预配置的 Token），之后不必再传：
+
+```bash
+dockhand config instance set prod base-url https://prod.example.com
+dockhand config instance set prod token dh_xxx        # 提前配好凭据
+dockhand config instance set lab base-url https://lab.example.com
+dockhand config instance list                          # 实例清单（密钥自动打码）
+dockhand config instance show prod / ... remove lab
+```
+
+用 `--instance <name>`（简写 `-i`）或 `DOCKHAND_INSTANCE` 选用；不带时用默认实例：
+
+```bash
+dockhand containers list                               # 默认实例
+dockhand -i prod containers list                       # prod 实例，自动带上它的 token
+dockhand --base-url https://lab.example.com stacks ls  # URL 命中实例时自动套用其凭据
+export DOCKHAND_INSTANCE=prod                          # 按 shell 会话切换
+```
+
+`dockhand login --instance prod --username admin` 则把登录凭据直接存进对应实例条目。
 
 ## 登录
 
@@ -40,8 +63,9 @@ dockhand config show                                 # 密码类字段自动打�
 ```bash
 dockhand login --username admin --password "$PASS"
 dockhand login --username admin --password "$PASS" --save-token ci   # 顺便签发 API token
+dockhand login --instance prod --username admin --password "$PASS"   # 凭据存入 prod 实例
 export DOCKHAND_TOKEN=dh_xxx         # CI 推荐用环境变量
-dockhand logout
+dockhand logout                       # 加 --instance prod 则只清该实例
 ```
 
 ## 命令模型

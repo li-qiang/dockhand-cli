@@ -17,6 +17,7 @@ const GLOBAL_FLAG_HELP = [
   ['--base-url <url>', `Dockhand base URL (default ${DEFAULTS.baseUrl}, env DOCKHAND_URL)`],
   ['--token <token>', 'API token sent as `Authorization: Bearer …` (env DOCKHAND_TOKEN)'],
   ['--cookie <value>', 'Session cookie; a bare value is sent as dockhand_session'],
+  ['-i, --instance <name>', 'Named instance from the config file: its URL and pre-configured credentials apply'],
   ['-e, --env <id>', 'Shorthand for the `env` query parameter used by most endpoints'],
   ['-o, --output <fmt>', 'json (default) | table | ndjson | raw | auto'],
   ['--timeout <ms>', `Request timeout in milliseconds (default ${DEFAULTS.timeout})`],
@@ -49,8 +50,12 @@ export function rootHelp(table) {
   }
   lines.push('');
   lines.push('EXTRA COMMANDS');
-  for (const cmd of table.commands.filter((c) => c.builtin && c.builtin !== 'help' && c.builtin !== 'version')) {
-    lines.push(`  ${cmd.name.padEnd(width + 2)}${cmd.summary}`);
+  const extras = table.commands.filter((c) => c.builtin && c.builtin !== 'help' && c.builtin !== 'version');
+  // Multi-word builtin names ("config instance list") can run longer than any
+  // group, so the column width accounts for them too.
+  const extraWidth = Math.max(width, ...extras.map((c) => c.name.length));
+  for (const cmd of extras) {
+    lines.push(`  ${cmd.name.padEnd(extraWidth + 2)}${cmd.summary}`);
   }
   lines.push('');
   lines.push('GLOBAL FLAGS');
@@ -59,12 +64,17 @@ export function rootHelp(table) {
   lines.push('ENVIRONMENT');
   lines.push('  DOCKHAND_URL        Base URL of the Dockhand instance');
   lines.push('  DOCKHAND_TOKEN      API token (alternative to `dockhand login`)');
+  lines.push('  DOCKHAND_INSTANCE   Named instance to use (same as --instance)');
   lines.push('  DOCKHAND_CONFIG     Config file path (default ~/.config/dockhand/config.json)');
   lines.push('  DOCKHAND_OUTPUT     Default output format');
   lines.push('  NO_COLOR            Disable colour');
   lines.push('');
   lines.push('EXAMPLES');
   lines.push('  dockhand login --username admin --password "$PASS"');
+  lines.push('  dockhand config instance set prod base-url https://dockhand.example.com');
+  lines.push('  dockhand config instance set prod token dh_xxx   # pre-configured credentials');
+  lines.push('  dockhand containers list                         # uses the default instance');
+  lines.push('  dockhand --instance prod containers list         # or -i prod');
   lines.push('  dockhand environments list');
   lines.push('  dockhand containers list -e 1');
   lines.push('  dockhand containers restart web --env 1');

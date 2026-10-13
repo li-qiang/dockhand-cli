@@ -1,11 +1,19 @@
 /**
- * Config resolution: CLI flag > environment variable > config file > default.
- * Nothing here reads the network, and secrets are only written to the config
- * file (mode 0600), never to stdout unless explicitly asked.
+ * Config resolution: CLI flag > named instance > environment variable >
+ * top-level config > default. Nothing here reads the network, and secrets are
+ * only written to the config file (mode 0600), never to stdout unless
+ * explicitly asked.
  *
- * There is no built-in host: point the CLI at your own Dockhand web UI with
- * `dockhand config set base-url <url>`, `DOCKHAND_URL`, or `--base-url`. The
- * localhost default only covers a local development instance.
+ * Multiple Dockhand instances are supported through named `instances` entries,
+ * each holding its own baseUrl and pre-configured credentials:
+ *
+ *   { "baseUrl": "https://default.example.com", "token": "…",
+ *     "instances": { "prod": { "baseUrl": "…", "token": "…" } } }
+ *
+ * Select one with `--instance <name>` / `DOCKHAND_INSTANCE`, or point
+ * `--base-url` / `DOCKHAND_URL` at a configured URL and its credentials apply
+ * automatically. There is no built-in host: the localhost default only covers
+ * a local development instance.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -56,6 +64,10 @@ export function redact(config) {
   const out = {};
   for (const [key, value] of Object.entries(config)) {
     if (value === undefined || value === null) continue;
+    if (key === 'instances' && value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = Object.fromEntries(Object.entries(value).map(([name, entry]) => [name, redact(entry)]));
+      continue;
+    }
     out[key] = SECRET_KEYS.has(key) ? maskSecret(value) : value;
   }
   return out;
@@ -69,25 +81,47 @@ export function maskSecret(value) {
 
 /**
  * Resolve the effective settings for a run. `flags` are already-parsed CLI flags.
+ *
+ * Per-field precedence: CLI flag > named instance > environment variable >
+ * top-level config > fallback env > default. A named instance is chosen with
+ * `--instance <name>` or `DOCKHAND_INSTANCE`; without one, a base URL that
+ * matches a configured instance pulls in that instance's credentials, so
+ * `--base-url https://prod…` needs no token on the command line.
  */
 export function resolveSettings(flags = new Map()) {
   const file = readConfig();
+  const instances = readInstances(file);
   const flag = (name) => {
     const values = flags.get(name);
     return values ? values[values.length - 1] : undefined;
   };
   const env = process.env;
 
-  const baseUrl = String(
-    flag('base-url') || flag('url') || env.DOCKHAND_URL || file.baseUrl || env.DOCKHAND_BASE_URL || DEFAULTS.baseUrl,
-  ).replace(/\/+$/, '');
-  // True when the user never pointed the CLI at their own instance; used to
-  // turn a bare connection failure into an actionable message.
-  const baseUrlConfigured = Boolean(
-    flag('base-url') || flag('url') || env.DOCKHAND_URL || env.DOCKHAND_BASE_URL || file.baseUrl,
-  );
-  const token = flag('token') || env.DOCKHAND_TOKEN || file.token || undefined;
-  const cookie = flag('cookie') || env.DOCKHAND_COOKIE || file.cookie || undefined;
+  // -- instance selection --------------------------------------------------
+  const instanceArg = flag('instance') ?? env.DOCKHAND_INSTANCE;
+  const requestedInstance = instanceArg === undefined || instanceArg === '' ? null : String(instanceArg);
+  const selected = requestedInstance ? instances[requestedInstance] ?? null : null;
+  // Surfaced instead of thrown so `help`/`completion` keep working; callers
+  // that need a real instance reject it before sending anything (`login`
+  // treats it as the name of an instance to create).
+  const instanceUnknown = requestedInstance && !selected ? requestedInstance : null;
+
+  // -- base URL ------------------------------------------------------------
+  const flagUrl = flag('base-url') || flag('url') || null;
+  const envUrl = env.DOCKHAND_URL || null;
+  const fileUrl = file.baseUrl || null;
+  const rawUrl = flagUrl || selected?.baseUrl || envUrl || fileUrl || env.DOCKHAND_BASE_URL || DEFAULTS.baseUrl;
+  const baseUrl = normalizeBaseUrl(rawUrl);
+  const baseUrlConfigured = Boolean(flagUrl || selected?.baseUrl || envUrl || fileUrl);
+
+  // -- credentials ---------------------------------------------------------
+  // An explicitly requested instance wins over ambient env so a stray
+  // DOCKHAND_URL/DOCKHAND_TOKEN can never mix two instances' identities; a
+  // URL-matched instance beats a stale top-level token.
+  const matched = selected ?? matchInstance(instances, baseUrl);
+  const token = flag('token') || selected?.token || matched?.token || env.DOCKHAND_TOKEN || file.token || undefined;
+  const cookie = flag('cookie') || selected?.cookie || matched?.cookie || env.DOCKHAND_COOKIE || file.cookie || undefined;
+
   const output = String(flag('output') || env.DOCKHAND_OUTPUT || DEFAULTS.output);
   const timeoutRaw = flag('timeout') || env.DOCKHAND_TIMEOUT;
   const timeout = timeoutRaw === undefined ? DEFAULTS.timeout : Number(timeoutRaw);
@@ -103,6 +137,8 @@ export function resolveSettings(flags = new Map()) {
     timeout: Number.isFinite(timeout) ? timeout : DEFAULTS.timeout,
     username,
     password,
+    instanceName: selected ? requestedInstance : matched?.name ?? null,
+    instanceUnknown,
     verbose: Boolean(flag('verbose')) || env.DOCKHAND_VERBOSE === '1',
     quiet: Boolean(flag('quiet')) || env.DOCKHAND_QUIET === '1',
     color: flag('no-color') ? false : process.stdout.isTTY === true && env.NO_COLOR === undefined,
@@ -112,4 +148,55 @@ export function resolveSettings(flags = new Map()) {
     configPath: configPath(),
     fileConfig: file,
   };
+}
+
+/** Strip trailing slashes so configured and requested URLs compare equal. */
+export function normalizeBaseUrl(url) {
+  return String(url).replace(/\/+$/, '');
+}
+
+/** Validated map of named instances; throws on a malformed config section. */
+export function readInstances(file = readConfig()) {
+  const raw = file.instances;
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`"instances" in ${configPath()} must be an object of named entries`);
+  }
+  for (const [name, entry] of Object.entries(raw)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`instances.${name} in ${configPath()} must be an object with baseUrl/token/cookie`);
+    }
+  }
+  return raw;
+}
+
+/** Match a configured instance by normalized base URL. */
+export function matchInstance(instances, baseUrl) {
+  const wanted = normalizeBaseUrl(baseUrl);
+  for (const [name, entry] of Object.entries(instances)) {
+    if (entry.baseUrl && normalizeBaseUrl(entry.baseUrl) === wanted) return { name, ...entry };
+  }
+  return null;
+}
+
+/**
+ * Create/update one named instance (`patch` merged into its entry; null
+ * values clear fields), or remove it entirely with `patch === null`. An
+ * entry left with no fields is dropped, and an empty instances map is not
+ * written back to the file.
+ */
+export function writeInstance(name, patch) {
+  if (!name || typeof name !== 'string') throw new Error('instance name is required');
+  const instances = { ...readInstances() };
+  if (patch === null) {
+    delete instances[name];
+  } else {
+    const entry = { ...(instances[name] ?? {}), ...patch };
+    for (const [key, value] of Object.entries(entry)) {
+      if (value === null || value === undefined || value === '') delete entry[key];
+    }
+    if (Object.keys(entry).length) instances[name] = entry;
+    else delete instances[name];
+  }
+  return writeConfig({ instances: Object.keys(instances).length ? instances : null });
 }

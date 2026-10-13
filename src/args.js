@@ -19,6 +19,7 @@ export const SHORT_FLAGS = {
   v: 'version',
   q: 'quiet',
   E: 'env',
+  i: 'instance',
 };
 
 /**

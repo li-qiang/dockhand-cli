@@ -40,7 +40,7 @@ const METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 
 /** Global flags the CLI owns; a spec field may never shadow one. */
 const GLOBAL_FLAGS = new Set([
-  'base-url', 'url', 'token', 'cookie', 'output', 'o', 'verbose', 'quiet',
+  'base-url', 'url', 'token', 'cookie', 'instance', 'i', 'output', 'o', 'verbose', 'quiet',
   'timeout', 'no-color', 'pretty', 'help', 'version', 'data', 'data-file',
   'stdin', 'form', 'file', 'raw', 'dry-run', 'public', 'api', 'method',
 ]);
@@ -697,6 +697,18 @@ const builtinCommands = [
   meta('config path', ['config'], null, 'Print the config file path', 'config.path'),
   meta('config set', ['config'], null, 'Set a config value (--base-url, --token, --cookie)', 'config.set'),
   meta('config unset', ['config'], null, 'Remove a config value', 'config.unset'),
+  meta('config instance list', ['config'], null, 'List the named instances configured in the config file (secrets redacted)', 'config.instance.list'),
+  meta('config instance set', ['config'], null, 'Configure a named instance: base-url, token or cookie — then select it with --instance <name>', 'config.instance.set', [
+    { name: 'name', arg: 'name', required: true, description: 'Instance name to select with --instance' },
+    { name: 'key', arg: 'key', required: true, description: 'base-url | token | cookie' },
+    { name: 'value', arg: 'value', required: true, description: 'Value to store' },
+  ]),
+  meta('config instance show', ['config'], null, 'Show one named instance with secrets redacted', 'config.instance.show', [
+    { name: 'name', arg: 'name', required: true, description: 'Instance name' },
+  ]),
+  meta('config instance remove', ['config'], null, 'Remove a named instance from the config file', 'config.instance.remove', [
+    { name: 'name', arg: 'name', required: true, description: 'Instance name' },
+  ]),
   meta('completion', ['completion'], null, 'Print a shell completion script (bash, zsh or fish)', 'completion', [{ name: 'shell', arg: 'shell', required: false, description: 'bash | zsh | fish' }]),
   meta('spec path', ['spec'], null, 'Print the path of the bundled OpenAPI document', 'spec.path'),
   meta('spec commands', ['spec'], null, 'Dump the whole generated command table as JSON (handy for agents)', 'spec.commands'),
