@@ -9,7 +9,7 @@ import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Client, CliError, EXIT } from './client.js';
-import { loadTable } from './commands.js';
+import { cliVersion, loadTable } from './commands.js';
 import {
   DEFAULTS,
   maskSecret,
@@ -93,7 +93,7 @@ function help({ table, positionals }) {
 }
 
 function version({ table, settings }) {
-  console.log(`${table.cli.name} ${table.cli.version}`);
+  console.log(`${table.cli.name} ${cliVersion()}`);
   console.log(`api    ${table.api.title} v${table.api.version}`);
   console.log(`spec   ${table.cli.specSource}`);
   console.log(

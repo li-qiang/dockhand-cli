@@ -26,6 +26,14 @@ export function resetTable() {
   aliasMapCache = null;
 }
 
+/**
+ * The CLI's own version, read from package.json at run time so `--version`
+ * never goes stale when the generated table predates a version bump.
+ */
+export function cliVersion() {
+  return JSON.parse(readFileSync(resolve(HERE, '../package.json'), 'utf8')).version;
+}
+
 export function commandsOf(table, group) {
   return table.commands.filter((c) => c.group === group);
 }

@@ -33,6 +33,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+const pkg = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'));
 let SPEC_PATH = resolve(ROOT, 'api/openapi.json');
 let OUT_PATH = resolve(ROOT, 'src/commands.generated.json');
 
@@ -720,7 +722,9 @@ const output = {
   $generated: 'DO NOT EDIT — regenerate with `npm run generate` (scripts/generate.mjs).',
   cli: {
     name: 'dockhand',
-    version: '1.0.0',
+    // The CLI's own version comes from package.json; the runtime reads it from
+    // there directly, so this field is informational only.
+    version: pkg.version,
     apiTitle: spec.info?.title ?? 'Dockhand API',
     apiVersion: spec.info?.version ?? '0.0.0',
     // Never record the machine the spec came from: only the bundled snapshot.
@@ -764,7 +768,18 @@ const serialized = `${JSON.stringify(output, null, 2)}\n`;
 // committed command table still matches api/openapi.json.
 if (checkOnly) {
   const current = existsSync(OUT_PATH) ? readFileSync(OUT_PATH, 'utf8') : '';
-  if (current === serialized) {
+  // cli.version follows package.json, not the spec, so a version bump between
+  // `generate` and `--check` is not spec drift. Everything else must match.
+  const comparable = (text) => {
+    try {
+      const table = JSON.parse(text);
+      if (table.cli) delete table.cli.version;
+      return JSON.stringify(table);
+    } catch {
+      return text;
+    }
+  };
+  if (current && comparable(current) === comparable(serialized)) {
     console.error(`ok: ${OUT_PATH} is up to date with ${SPEC_PATH}`);
     process.exit(0);
   }

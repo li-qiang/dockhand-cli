@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 
 import { parseArgs, BOOLEAN_GLOBAL_FLAGS, SHORT_FLAGS } from './args.js';
-import { loadTable, resolveCommand } from './commands.js';
+import { cliVersion, loadTable, resolveCommand } from './commands.js';
 import { CliError, Client, EXIT } from './client.js';
 import { resolveSettings, readInstances } from './config.js';
 import { commandHelp, groupHelp, rootHelp, setColor, unknownCommandHelp, usageFor } from './help.js';
@@ -54,7 +54,7 @@ async function run(argv) {
 
   if (argv.length === 0 || words.length === 0) {
     if (wantsVersion && !wantsHelp) {
-      console.log(`${table.cli.name} ${table.cli.version} (${table.api.title} v${table.api.version})`);
+      console.log(`${table.cli.name} ${cliVersion()} (${table.api.title} v${table.api.version})`);
       return;
     }
     console.log(rootHelp(table));
@@ -94,7 +94,7 @@ async function run(argv) {
   const { positionals, flags, rest: passthrough } = parseArgs(rest, { booleans });
 
   if (lastFlag(flags, 'version') === true && !command.builtin) {
-    console.log(`${table.cli.name} ${table.cli.version} (${table.api.title} v${table.api.version})`);
+    console.log(`${table.cli.name} ${cliVersion()} (${table.api.title} v${table.api.version})`);
     return;
   }
 

@@ -2,7 +2,7 @@
   "$generated": "DO NOT EDIT — regenerate with `npm run generate` (scripts/generate.mjs).",
   "cli": {
     "name": "dockhand",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "apiTitle": "Dockhand API",
     "apiVersion": "1.0.46",
     "specSource": "api/openapi.json",
