@@ -203,12 +203,13 @@ export class Client {
     if (buffer.startsWith('data:')) process.stdout.write(`${buffer.slice(5).trim()}\n`);
   }
 
-  setCookieHeader(response) {
-    if (typeof response.headers.getSetCookie === 'function') {
-      const cookies = response.headers.getSetCookie();
+  /** Extract Set-Cookie values from a `Headers` instance, as returned by request(). */
+  setCookieHeader(headers) {
+    if (typeof headers?.getSetCookie === 'function') {
+      const cookies = headers.getSetCookie();
       if (cookies.length) return cookies;
     }
-    const single = response.headers.get('set-cookie');
+    const single = headers?.get?.('set-cookie');
     return single ? [single] : [];
   }
 }

@@ -5,7 +5,7 @@ import { parseArgs } from '../src/args.js';
 import { loadTable, resolveCommand } from '../src/commands.js';
 import { buildRequest, commandWords } from '../src/cli.js';
 import { render } from '../src/render.js';
-import { CliError } from '../src/client.js';
+import { CliError, Client } from '../src/client.js';
 import { DEFAULTS, resolveSettings, readInstances, redact } from '../src/config.js';
 import { runBuiltin } from '../src/builtins.js';
 import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -267,6 +267,26 @@ test('base URL comes from flag, env or file — never from the binary', () => {
   if (previous.base) process.env.DOCKHAND_BASE_URL = previous.base;
   if (previous.config) process.env.DOCKHAND_CONFIG = previous.config;
   else delete process.env.DOCKHAND_CONFIG;
+});
+
+// ---------------------------------------------------------------------------
+// client internals
+// ---------------------------------------------------------------------------
+
+test('setCookieHeader reads cookies off a Headers object (login regression)', () => {
+  const client = new Client(base);
+  const headers = new Headers();
+  headers.append('set-cookie', 'dockhand_session=abc123; Path=/; HttpOnly');
+  assert.deepEqual(client.setCookieHeader(headers), ['dockhand_session=abc123; Path=/; HttpOnly']);
+  // no session cookie -> empty list, not a crash
+  assert.deepEqual(client.setCookieHeader(new Headers()), []);
+});
+
+test('setCookieHeader falls back to get() when getSetCookie is unavailable', () => {
+  const client = new Client(base);
+  const legacy = { get: (name) => (name === 'set-cookie' ? 'dockhand_session=legacy' : null) };
+  assert.deepEqual(client.setCookieHeader(legacy), ['dockhand_session=legacy']);
+  assert.deepEqual(client.setCookieHeader(undefined), []);
 });
 
 // ---------------------------------------------------------------------------
