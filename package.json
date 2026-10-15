@@ -1,6 +1,6 @@
 {
   "name": "@qlee/dockhand-cli",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Command-line client for the Dockhand API — every command is generated from the instance's OpenAPI document. Containers, images, volumes, networks, compose stacks, environments, backups, schedules.",
   "keywords": [
     "dockhand",
