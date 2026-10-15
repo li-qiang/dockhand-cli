@@ -4,8 +4,9 @@
 # tag 推送后本 workflow 自动: 校验 tag 与 package.json 版本一致 → npm run verify →
 # npm publish(带 provenance)→ 创建 GitHub Release。
 #
-# 前置条件: 仓库 Settings → Secrets and variables → Actions 里配置 NPM_TOKEN
-# (npmjs.com → Access Tokens → Generate New Token → 类型 Automation)。
+# 前置条件: npmjs.com 上给 @qlee/dockhand-cli 配置 Trusted Publisher,指向
+# 本仓库(li-qiang/dockhand-cli)和本 workflow 文件(publish.yml)。
+# 发布走 GitHub OIDC,不需要任何 NPM_TOKEN secret;npm CLI >= 11.5.1(Node 24)。
 
 name: Publish
 
@@ -26,11 +27,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24 # npm >= 11.5.1 才支持 trusted publishing(OIDC)
           registry-url: https://registry.npmjs.org
 
       - name: Check tag matches package.json version
@@ -52,10 +53,8 @@ jobs:
       - name: Show tarball contents
         run: npm pack --dry-run
 
-      - name: Publish to npm
+      - name: Publish to npm (trusted publishing via OIDC)
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         env:

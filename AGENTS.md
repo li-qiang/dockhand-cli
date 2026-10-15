@@ -276,9 +276,10 @@ git push origin master --follow-tags      # 3. 推送（含 tag）→ 触发自�
 # 之后去 GitHub Actions 看 Publish workflow 跑完即可，不需要手动 npm publish
 ```
 
-前置条件（一次性配置）：仓库 Settings → Secrets and variables → Actions 里配置
-`NPM_TOKEN`（npmjs.com → Access Tokens → Generate New Token → 类型 Automation）。
-npm provenance 需要 `id-token: write` 权限（workflow 里已声明）。
+前置条件（一次性配置）：npmjs.com 上给包配置 **Trusted Publisher**——包页面 →
+Settings → Trusted Publishers，填 GitHub 仓库 `li-qiang/dockhand-cli` 和 workflow
+文件名 `publish.yml`。发布走 GitHub OIDC（workflow 里 `id-token: write`），
+不需要配置任何 NPM_TOKEN secret；注意 CI 用 Node 24（npm ≥ 11.5.1 才支持）。
 
 手动兜底（CI 不可用时才用）：先确认 tag 已推上远端，再 `npm publish`；
 `prepublishOnly` 会自动跑 verify。
