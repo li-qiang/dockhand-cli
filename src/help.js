@@ -63,14 +63,16 @@ export function rootHelp(table) {
   lines.push('');
   lines.push('ENVIRONMENT');
   lines.push('  DOCKHAND_URL        Base URL of the Dockhand instance');
-  lines.push('  DOCKHAND_TOKEN      API token (alternative to `dockhand login`)');
+  lines.push('  DOCKHAND_TOKEN      API token sent as Bearer (store one with `dockhand login --token`)');
   lines.push('  DOCKHAND_INSTANCE   Named instance to use (same as --instance)');
   lines.push('  DOCKHAND_CONFIG     Config file path (default ~/.config/dockhand/config.json)');
   lines.push('  DOCKHAND_OUTPUT     Default output format');
   lines.push('  NO_COLOR            Disable colour');
   lines.push('');
   lines.push('EXAMPLES');
+  lines.push('  dockhand login --token dh_xxx                    # long-lived API token (`--token -` reads stdin)');
   lines.push('  dockhand login --username admin --password "$PASS"');
+  lines.push('  dockhand login --username admin --password "$PASS" --save-token ci');
   lines.push('  dockhand config instance set prod base-url https://dockhand.example.com');
   lines.push('  dockhand config instance set prod token dh_xxx   # pre-configured credentials');
   lines.push('  dockhand containers list                         # uses the default instance');

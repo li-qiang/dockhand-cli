@@ -159,14 +159,23 @@ dockhand stacks deploys immich 42            →  GET /api/stacks/immich/deploys
 
 ## 5. 认证
 
+**推荐 API token 登录**（token 长期有效，session cookie 会过期）：
+
 ```bash
-dockhand login --username admin --password "$PASS"            # 存 session cookie
+dockhand login --token dh_xxx                  # 校验并保存 API token（推荐）
+dockhand login --token - < token.txt           # 从 stdin 读 token
+dockhand login --username admin --password "$PASS"                   # 存 session cookie（会过期）
 dockhand login --username admin --password "$PASS" --save-token ci   # 顺便签发 API token
+dockhand login --username admin --password "$PASS" --save-token ci --expires-at 2027-01-01T00:00:00Z
 dockhand config set token dh_xxx
 dockhand logout
 ```
 
+- `login --token` 先用 `GET /api/auth/session` 校验 token（校验时不带 cookie），
+  通过后连同本次的 base URL 一起写进配置文件；`--token -` 从 stdin 读入。
+- `--token` 与 `--username/--password/--mfa-token/--provider/--save-token` 互斥。
 - 服务端 `Set-Cookie: dockhand_session=…` 会被存进配置文件（0600 权限）。
+- 登录成功时若本次显式指定了 base URL（flag 或 env），顶层（或实例条目）会记录它。
 - 也可以只用环境变量 `DOCKHAND_TOKEN`，适合 CI。
 - 写操作前建议先 `dockhand <cmd> --dry-run` 确认将要发出的请求。
 - 401/403 退出码为 3，429 为 6，详见 `src/client.js` 的 `EXIT`。

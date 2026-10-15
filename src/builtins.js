@@ -203,21 +203,59 @@ async function raw({ table, positionals, flags, passthrough, settings }) {
 }
 
 async function login({ flags, settings }) {
+  const tokenArg = flags.has('token') ? String(first(flags, 'token') ?? '') : undefined;
   const username = first(flags, 'username') ?? first(flags, 'user') ?? settings.username;
   const password = first(flags, 'password') ?? settings.password;
   const mfaToken = first(flags, 'mfa-token');
   const provider = first(flags, 'provider');
 
-  if (!username) {
-    throw new CliError('missing --username (or set DOCKHAND_USERNAME)', { exitCode: EXIT.USAGE });
+  const saveTokenRaw = flags.has('save-token') ? String(first(flags, 'save-token') ?? '') : undefined;
+  if (saveTokenRaw !== undefined && ['', 'true', 'false'].includes(saveTokenRaw)) {
+    throw new CliError('--save-token expects a name for the API token it creates, e.g. --save-token ci', {
+      exitCode: EXIT.USAGE,
+    });
   }
-  if (!password && !settings.cookie && !settings.token) {
+  const expiresAt = first(flags, 'expires-at');
+  if (expiresAt !== undefined && !saveTokenRaw) {
+    throw new CliError('--expires-at is only valid together with --save-token <name>', { exitCode: EXIT.USAGE });
+  }
+  if (expiresAt === '') {
+    throw new CliError('--expires-at expects a date, e.g. --expires-at 2027-01-01T00:00:00Z', { exitCode: EXIT.USAGE });
+  }
+
+  // Token login: store a long-lived API token instead of a session cookie.
+  if (tokenArg !== undefined) {
+    const conflicts = [
+      ['--username', flags.has('username') || flags.has('user')],
+      ['--password', flags.has('password')],
+      ['--mfa-token', mfaToken !== undefined],
+      ['--provider', provider !== undefined],
+      ['--save-token', flags.has('save-token')],
+    ].filter(([, present]) => present).map(([name]) => name);
+    if (conflicts.length) {
+      throw new CliError(
+        `--token cannot be combined with ${conflicts.join(', ')} — the token already is the credential\n`
+        + '  (use --save-token with --username/--password if you want a new token issued from a session)',
+        { exitCode: EXIT.USAGE },
+      );
+    }
+    return tokenLogin(tokenArg, settings);
+  }
+
+  if (!username) {
+    throw new CliError(
+      'missing --username (or set DOCKHAND_USERNAME)\n'
+      + '  to stay logged in without a session, store an API token instead:\n'
+      + '    dockhand login --token dh_xxx        # `-` reads the token from stdin',
+      { exitCode: EXIT.USAGE },
+    );
+  }
+  if (!password) {
     throw new CliError('missing --password (or set DOCKHAND_PASSWORD)', { exitCode: EXIT.USAGE });
   }
 
   const client = new Client({ ...settings, token: undefined });
-  const body = { username };
-  if (password) body.password = password;
+  const body = { username, password };
   if (mfaToken) body.mfaToken = mfaToken;
   if (provider) body.provider = provider;
 
@@ -238,13 +276,16 @@ async function login({ flags, settings }) {
   const saved = saveCredentials(settings, { cookie: session });
 
   let tokenSaved = null;
-  const tokenName = first(flags, 'save-token');
-  if (tokenName) {
+  if (saveTokenRaw) {
     const tokenClient = new Client({ ...settings, cookie: session, token: undefined });
     const tokenResult = await tokenClient.request({
       method: 'POST',
       path: '/api/auth/tokens',
-      body: { name: String(tokenName), ...(password ? { password } : {}) },
+      body: {
+        name: saveTokenRaw,
+        ...(expiresAt ? { expiresAt: String(expiresAt) } : {}),
+        ...(password ? { password } : {}),
+      },
     });
     const token = tokenResult.data?.token ?? tokenResult.data?.apiToken ?? tokenResult.data?.value;
     if (!token) {
@@ -253,13 +294,14 @@ async function login({ flags, settings }) {
       });
     }
     saveCredentials(settings, { token });
-    tokenSaved = { name: tokenName, token };
+    tokenSaved = { name: saveTokenRaw, token };
   }
 
   const target = settings.instanceName ?? settings.instanceUnknown;
   const output = {
     success: true,
     instance: target ?? null,
+    auth: tokenSaved ? 'session+token' : 'session',
     user: result.data?.user ?? null,
     configFile: saved.path,
     cookie: maskSecret(session),
@@ -274,6 +316,64 @@ async function login({ flags, settings }) {
 }
 
 /**
+ * Token login: validate a long-lived API token against the instance and store
+ * it in the config file. Unlike the session-cookie flow nothing expires after
+ * a few idle days, which is what CI, cron jobs and agents need. `--token -`
+ * reads the token from stdin so it never lands in shell history.
+ */
+async function tokenLogin(tokenArg, settings) {
+  let token = tokenArg;
+  if (token === '-') token = readFileSync(0, 'utf8').trim();
+  if (!token) {
+    throw new CliError(
+      'missing value for --token — pass the API token, or `-` to read it from stdin:\n'
+      + '    dockhand login --token dh_xxx\n'
+      + '    dockhand login --token - < token.txt',
+      { exitCode: EXIT.USAGE },
+    );
+  }
+
+  // Validate the token on its own (no cookie attached) so a stale stored
+  // session can never mask a broken token.
+  const client = new Client({ ...settings, token, cookie: undefined });
+  let session;
+  try {
+    session = await client.request({ method: 'GET', path: '/api/auth/session' });
+  } catch (error) {
+    if (error instanceof CliError && error.exitCode === EXIT.AUTH) {
+      throw new CliError(`the server rejected this API token — ${error.message}`, {
+        exitCode: EXIT.AUTH,
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  if (session.data?.authenticated !== true) {
+    throw new CliError('the server did not accept this API token (/api/auth/session reports authenticated=false)', {
+      exitCode: EXIT.AUTH,
+    });
+  }
+
+  const saved = saveCredentials(settings, { token });
+  const target = settings.instanceName ?? settings.instanceUnknown;
+  const output = {
+    success: true,
+    instance: target ?? null,
+    auth: 'token',
+    user: session.data?.user ?? null,
+    configFile: saved.path,
+    cookie: '(unchanged)',
+    token: maskSecret(token),
+  };
+  console.log(JSON.stringify(output, null, 2));
+  if (!settings.quiet) {
+    process.stderr.write(
+      `API token ${target ? `for instance "${target}" ` : ''}stored in ${saved.path}\n`,
+    );
+  }
+}
+
+/**
  * Store login credentials either at the top level (no instance involved) or
  * inside the named instance's entry. When a new instance gets its first
  * credentials, its base URL is recorded too — otherwise the entry could never
@@ -281,7 +381,12 @@ async function login({ flags, settings }) {
  */
 function saveCredentials(settings, patch) {
   const target = settings.instanceName ?? settings.instanceUnknown;
-  if (!target) return writeConfig(patch);
+  if (!target) {
+    // Remember which server these credentials belong to, so later commands do
+    // not silently fall back to the localhost default.
+    const full = settings.baseUrlConfigured ? { baseUrl: settings.baseUrl, ...patch } : patch;
+    return writeConfig(full);
+  }
   const existing = readInstances()[target] ?? {};
   const entry = { ...patch };
   if (!existing.baseUrl && !entry.baseUrl) {

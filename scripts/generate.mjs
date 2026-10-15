@@ -693,7 +693,7 @@ const builtinCommands = [
   meta('raw', ['raw'], null, 'Call any Dockhand API path directly — the escape hatch for routes the generator has not seen', 'raw'),
   meta('help', ['help'], null, 'Show help for the CLI, for a group, or for a single command', 'help'),
   meta('version', ['version'], null, 'Print the CLI version and the API version the command table was generated from', 'version'),
-  meta('login', ['login'], 'POST', 'Authenticate and store a session cookie or API token in the config file', 'login'),
+  meta('login', ['login'], 'POST', 'Authenticate and store credentials in the config file: a long-lived API token (--token) or a username/password session cookie', 'login'),
   meta('logout', ['logout'], 'POST', 'Drop the stored session cookie and API token', 'logout'),
   meta('config show', ['config'], null, 'Show the resolved configuration with secrets redacted', 'config.show'),
   meta('config path', ['config'], null, 'Print the config file path', 'config.path'),

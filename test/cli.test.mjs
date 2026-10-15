@@ -390,6 +390,8 @@ function withTempConfig(config, run) {
     instance: process.env.DOCKHAND_INSTANCE,
     token: process.env.DOCKHAND_TOKEN,
     cookie: process.env.DOCKHAND_COOKIE,
+    username: process.env.DOCKHAND_USERNAME,
+    password: process.env.DOCKHAND_PASSWORD,
   };
   process.env.DOCKHAND_CONFIG = path;
   delete process.env.DOCKHAND_URL;
@@ -397,9 +399,9 @@ function withTempConfig(config, run) {
   delete process.env.DOCKHAND_INSTANCE;
   delete process.env.DOCKHAND_TOKEN;
   delete process.env.DOCKHAND_COOKIE;
-  try {
-    return run(path);
-  } finally {
+  delete process.env.DOCKHAND_USERNAME;
+  delete process.env.DOCKHAND_PASSWORD;
+  const cleanup = () => {
     if (previous.config) process.env.DOCKHAND_CONFIG = previous.config;
     else delete process.env.DOCKHAND_CONFIG;
     if (previous.url) process.env.DOCKHAND_URL = previous.url;
@@ -407,7 +409,19 @@ function withTempConfig(config, run) {
     if (previous.instance) process.env.DOCKHAND_INSTANCE = previous.instance;
     if (previous.token) process.env.DOCKHAND_TOKEN = previous.token;
     if (previous.cookie) process.env.DOCKHAND_COOKIE = previous.cookie;
+    if (previous.username) process.env.DOCKHAND_USERNAME = previous.username;
+    if (previous.password) process.env.DOCKHAND_PASSWORD = previous.password;
     rmSync(dir, { recursive: true, force: true });
+  };
+  try {
+    const result = run(path);
+    // Async builtins (login) keep the isolated env until they settle.
+    if (result instanceof Promise) return result.finally(cleanup);
+    cleanup();
+    return result;
+  } catch (error) {
+    cleanup();
+    throw error;
   }
 }
 
@@ -536,6 +550,135 @@ test('config instance builtins round-trip through the config file', () => {
     const finalConfig = readFileSync(path, 'utf8');
     assert.match(finalConfig, /"instances"/);
     assert.ok(!finalConfig.includes('lab.example.com'), 'removed instance disappears from the config file');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// login
+// ---------------------------------------------------------------------------
+
+const loginCommand = resolveCommand(table, ['login']).command;
+
+function loginCtx(flags, settings) {
+  return { table, positionals: [], flags, passthrough: [], settings: settings ?? resolveSettings(new Map()) };
+}
+
+/** Capture console.log/process.stderr.write around an async builtin. */
+async function captureIO(run) {
+  const printed = [];
+  const errors = [];
+  const log = console.log;
+  const write = process.stderr.write;
+  console.log = (line) => printed.push(String(line));
+  process.stderr.write = (line) => (errors.push(String(line)), true);
+  try {
+    return { result: await run(), printed, errors };
+  } finally {
+    console.log = log;
+    process.stderr.write = write;
+  }
+}
+
+function mockSessionFetch(responses) {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const headers = init?.headers ?? {};
+    calls.push({
+      url: String(url),
+      authorization: headers.authorization,
+      cookie: headers.cookie,
+    });
+    const next = responses[calls.length - 1] ?? responses.at(-1);
+    return new Response(JSON.stringify(next.body ?? {}), {
+      status: next.status ?? 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  return { calls, restore: () => (globalThis.fetch = realFetch) };
+}
+
+test('login --token validates the API token and stores it with the base url', async () => {
+  await withTempConfig({ baseUrl: 'https://default.example.com' }, async (path) => {
+    const mock = mockSessionFetch([{
+      body: { authenticated: true, authEnabled: true, user: { id: 1, username: 'admin', isAdmin: true } },
+    }]);
+    try {
+      const { printed } = await captureIO(() => runBuiltin(
+        loginCommand,
+        loginCtx(new Map([['token', ['dh_tokenvalue1234567890']]])),
+      ));
+      // Exactly one request: GET /api/auth/session with the Bearer token and no cookie.
+      assert.deepEqual(mock.calls, [{
+        url: 'https://default.example.com/api/auth/session',
+        authorization: 'Bearer dh_tokenvalue1234567890',
+        cookie: undefined,
+      }]);
+      // The token lands in the config file, masked only on stdout.
+      const stored = JSON.parse(readFileSync(path, 'utf8'));
+      assert.equal(stored.token, 'dh_tokenvalue1234567890');
+      assert.equal(stored.baseUrl, 'https://default.example.com');
+      const output = printed.join('\n');
+      assert.match(output, /"auth": "token"/);
+      assert.match(output, /"username": "admin"/);
+      assert.ok(!output.includes('dh_tokenvalue1234567890'), 'the full token is never printed');
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+test('login --token refuses to store a token the server rejects', async () => {
+  await withTempConfig({ baseUrl: 'https://default.example.com' }, async (path) => {
+    const mock = mockSessionFetch([{ status: 401, body: { error: 'invalid token' } }]);
+    try {
+      await assert.rejects(
+        () => captureIO(() => runBuiltin(loginCommand, loginCtx(new Map([['token', ['dh_wrongtoken123']]])))),
+        (error) => error instanceof CliError
+          && error.exitCode === 3
+          && /rejected this API token/.test(error.message),
+      );
+      const stored = JSON.parse(readFileSync(path, 'utf8'));
+      assert.equal(stored.token, undefined, 'a rejected token must not be persisted');
+    } finally {
+      mock.restore();
+    }
+  });
+});
+
+test('login --token usage errors: conflicts, empty values, missing credentials', async () => {
+  await withTempConfig({}, async () => {
+    const mock = mockSessionFetch([{ body: {} }]);
+    try {
+      // --token is mutually exclusive with the session flags.
+      await assert.rejects(
+        () => runBuiltin(loginCommand, loginCtx(new Map([['token', ['dh_x']], ['username', ['admin']]]))),
+        (error) => error.exitCode === 2 && /--token cannot be combined with --username/.test(error.message),
+      );
+      await assert.rejects(
+        () => runBuiltin(loginCommand, loginCtx(new Map([['token', ['dh_x']], ['save-token', ['ci']]]))),
+        (error) => error.exitCode === 2 && /--save-token/.test(error.message),
+      );
+      // A bare --token (empty value) explains how to pass one.
+      await assert.rejects(
+        () => runBuiltin(loginCommand, loginCtx(new Map([['token', ['']]]))),
+        (error) => error.exitCode === 2 && /missing value for --token/.test(error.message),
+      );
+      // --expires-at belongs to --save-token.
+      await assert.rejects(
+        () => runBuiltin(loginCommand, loginCtx(new Map([['expires-at', ['2027-01-01T00:00:00Z']]]))),
+        (error) => error.exitCode === 2 && /--expires-at is only valid together with --save-token/.test(error.message),
+      );
+      // Missing credentials point at the token flow.
+      await assert.rejects(
+        () => runBuiltin(loginCommand, loginCtx(new Map())),
+        (error) => error.exitCode === 2 && /missing --username[\s\S]*login --token/.test(error.message),
+      );
+      // None of the usage errors hit the network.
+      assert.equal(mock.calls.length, 0);
+    } finally {
+      mock.restore();
+    }
   });
 });
 

@@ -54,19 +54,27 @@ dockhand --base-url https://lab.example.com stacks ls  # URL 命中实例时自�
 export DOCKHAND_INSTANCE=prod                          # 按 shell 会话切换
 ```
 
-`dockhand login --instance prod --username admin` 则把登录凭据直接存进对应实例条目。
+`dockhand login --instance prod --token dh_xxx`（或 `--username … --password …`）则把登录凭据直接存进对应实例条目。
 
 ## 登录
 
-实例开启认证时才需要：
+实例开启认证时才需要。**推荐用 API token 登录**：token 长期有效，不会像 session
+cookie 一样过期，适合 CI、定时任务和 agent 长期使用。
 
 ```bash
-dockhand login --username admin --password "$PASS"
+dockhand login --token dh_xxx          # 校验并长期保存 API token（推荐）
+dockhand login --token - < token.txt   # 从 stdin 读 token，不进 shell 历史
+dockhand login --username admin --password "$PASS"                    # 存 session cookie（会过期）
 dockhand login --username admin --password "$PASS" --save-token ci   # 顺便签发 API token
-dockhand login --instance prod --username admin --password "$PASS"   # 凭据存入 prod 实例
-export DOCKHAND_TOKEN=dh_xxx         # CI 推荐用环境变量
+dockhand login --username admin --password "$PASS" --save-token ci --expires-at 2027-01-01T00:00:00Z
+dockhand login --instance prod --token dh_xxx         # 凭据存入 prod 实例
+export DOCKHAND_TOKEN=dh_xxx         # CI 也可以只用环境变量
 dockhand logout                       # 加 --instance prod 则只清该实例
 ```
+
+`login --token` 会先调 `GET /api/auth/session` 验证 token 有效再落盘；登录时用的
+base URL（`--base-url` / `DOCKHAND_URL`）也会一并记入配置文件。token 可在
+Dockhand 网页端创建（失效时间可选，留空则永不过期）。
 
 ## 命令模型
 

@@ -40,18 +40,25 @@ export DOCKHAND_INSTANCE=prod                          # or switch per shell
 
 ## 2. Authenticate
 
-Authentication is only required when the instance has auth enabled.
+Authentication is only required when the instance has auth enabled. **Prefer an
+API token** — it is long-lived, while the username/password session cookie can
+expire mid-session.
 
 ```bash
-dockhand login --username admin --password "$PASSWORD"   # stores the session cookie
+dockhand login --token dh_...        # validates and stores the token (recommended)
+dockhand login --token - < token.txt # read the token from stdin (keeps it out of history)
+dockhand login --username admin --password "$PASSWORD"   # session cookie (can expire)
 dockhand login --username admin --password "$PASSWORD" --save-token ci
-dockhand login --instance prod --username admin --password "$PASSWORD"   # into that instance
+dockhand login --instance prod --token dh_...            # into that instance
 export DOCKHAND_TOKEN=dh_...                             # preferred in CI
 ```
 
-Credentials live in `~/.config/dockhand/config.json` (mode 0600); instance
-credentials live in the `instances` section of the same file. `dockhand logout`
-clears the default credentials, or the named instance with `--instance prod`.
+`login --token` verifies the token via `GET /api/auth/session` before storing
+it, and also records the base URL it was used with. Create tokens in the
+Dockhand web UI; leaving the expiry empty makes them non-expiring. Credentials
+live in `~/.config/dockhand/config.json` (mode 0600); instance credentials live
+in the `instances` section of the same file. `dockhand logout` clears the
+default credentials, or the named instance with `--instance prod`.
 
 ## 3. Command model
 
@@ -173,7 +180,7 @@ cat payload.json | dockhand raw PUT /api/some/route --stdin
 |---|---|
 | `unknown command` / `unknown action` | run `dockhand help <group>`; the endpoint may be new — refresh with `npx @qlee/dockhand-cli generate --fetch https://<host>/openapi.json` |
 | exit 2 | the message lists the valid flags or missing arguments |
-| exit 3 | run `dockhand login`, or set `DOCKHAND_TOKEN` |
+| exit 3 | run `dockhand login --token dh_...` (or set `DOCKHAND_TOKEN`) |
 | exit 7 and no URL configured | `dockhand config set base-url https://<host>` |
 | empty list | the endpoint usually needs an environment id: add `-e <id>` |
 
