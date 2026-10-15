@@ -1,0 +1,63 @@
+# 通过 Tag 自动发布到 npm:
+#   npm version <patch|minor|major>   # 产生版本提交 + v* tag
+#   git push origin master --follow-tags
+# tag 推送后本 workflow 自动: 校验 tag 与 package.json 版本一致 → npm run verify →
+# npm publish(带 provenance)→ 创建 GitHub Release。
+#
+# 前置条件: 仓库 Settings → Secrets and variables → Actions 里配置 NPM_TOKEN
+# (npmjs.com → Access Tokens → Generate New Token → 类型 Automation)。
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # 创建 GitHub Release
+  id-token: write # npm provenance(OIDC)
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Check tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG_VERSION package.json=$PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME (${TAG_VERSION}) 与 package.json 版本 (${PKG_VERSION}) 不一致"
+            exit 1
+          fi
+
+      - name: Install
+        run: npm install --no-fund --no-audit
+
+      - name: Verify (audit + generate --check + test)
+        run: npm run verify
+
+      - name: Show tarball contents
+        run: npm pack --dry-run
+
+      - name: Publish to npm
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes

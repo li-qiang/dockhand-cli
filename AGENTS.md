@@ -264,18 +264,26 @@ dockhand generate --fetch <url>           # 已安装的包里也能重新生成
 
 ## 8. 发布到 npm
 
-**硬性顺序：先 commit 并 push（含 tag），最后才 `npm publish`。** npm 上的每个版本
-必须能对应到 GitHub 上已推送的提交和 tag；发完版还有改动没提交/没推，仓库和
-registry 就对不上了。完整流程：
+**发布是自动的：推送 `v*` tag 就会触发 `.github/workflows/publish.yml`。** workflow 会校验
+tag 与 `package.json` 版本一致 → `npm run verify` → `npm publish --provenance` → 创建
+GitHub Release。npm 上的每个版本必须能对应到 GitHub 上已推送的提交和 tag；发版前
+不许带着脏工作区。完整流程：
 
 ```bash
 git add -A && git commit -m "<message>"   # 1. 提交全部改动，不许带着脏工作区发版
 npm version <patch|minor|major>           # 2. 版本号 + 版本提交 + git tag
-git push origin master --follow-tags      # 3. 推送（含 tag），让远端先就位
-npm publish                               # 4. 最后发布；prepublishOnly 自动跑 verify
+git push origin master --follow-tags      # 3. 推送（含 tag）→ 触发自动发布
+# 之后去 GitHub Actions 看 Publish workflow 跑完即可，不需要手动 npm publish
 ```
 
-发布前的自检（可单独跑，`npm publish` 时也会自动执行）：
+前置条件（一次性配置）：仓库 Settings → Secrets and variables → Actions 里配置
+`NPM_TOKEN`（npmjs.com → Access Tokens → Generate New Token → 类型 Automation）。
+npm provenance 需要 `id-token: write` 权限（workflow 里已声明）。
+
+手动兜底（CI 不可用时才用）：先确认 tag 已推上远端，再 `npm publish`；
+`prepublishOnly` 会自动跑 verify。
+
+发布前的自检（可单独跑，CI 和 `npm publish` 时也会自动执行）：
 
 ```bash
 npm run verify            # 生成器 --check + 测试
