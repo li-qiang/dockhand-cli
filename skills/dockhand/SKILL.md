@@ -53,7 +53,7 @@ dockhand login --instance prod --token dh_...            # into that instance
 export DOCKHAND_TOKEN=dh_...                             # preferred in CI
 ```
 
-`login --token` verifies the token via `GET /api/auth/session` before storing
+`login --token` verifies the token via `GET /api/auth/tokens` before storing
 it, and also records the base URL it was used with. Create tokens in the
 Dockhand web UI; leaving the expiry empty makes them non-expiring. Credentials
 live in `~/.config/dockhand/config.json` (mode 0600); instance credentials live

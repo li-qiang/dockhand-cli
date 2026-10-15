@@ -72,9 +72,10 @@ export DOCKHAND_TOKEN=dh_xxx         # CI 也可以只用环境变量
 dockhand logout                       # 加 --instance prod 则只清该实例
 ```
 
-`login --token` 会先调 `GET /api/auth/session` 验证 token 有效再落盘；登录时用的
-base URL（`--base-url` / `DOCKHAND_URL`）也会一并记入配置文件。token 可在
-Dockhand 网页端创建（失效时间可选，留空则永不过期）。
+`login --token` 会先调 `GET /api/auth/tokens` 验证 token 有效再落盘（`/api/auth/session`
+是公开的 bootstrap 端点，不反映 Bearer token 的有效性）；登录时用的 base URL
+（`--base-url` / `DOCKHAND_URL`）也会一并记入配置文件。token 可在 Dockhand 网页端
+创建（失效时间可选，留空则永不过期）。
 
 ## 命令模型
 

@@ -600,26 +600,30 @@ function mockSessionFetch(responses) {
 
 test('login --token validates the API token and stores it with the base url', async () => {
   await withTempConfig({ baseUrl: 'https://default.example.com' }, async (path) => {
-    const mock = mockSessionFetch([{
-      body: { authenticated: true, authEnabled: true, user: { id: 1, username: 'admin', isAdmin: true } },
-    }]);
+    const mock = mockSessionFetch([
+      // GET /api/auth/tokens — the endpoint that actually evaluates the Bearer token.
+      { body: [{ id: 42, name: 'ci', tokenPrefix: 'tokenval' }] },
+      // GET /api/auth/session — best-effort user display only.
+      { body: { authenticated: true, authEnabled: true, user: { id: 1, username: 'admin', isAdmin: true } } },
+    ]);
     try {
       const { printed } = await captureIO(() => runBuiltin(
         loginCommand,
         loginCtx(new Map([['token', ['dh_tokenvalue1234567890']]])),
       ));
-      // Exactly one request: GET /api/auth/session with the Bearer token and no cookie.
-      assert.deepEqual(mock.calls, [{
-        url: 'https://default.example.com/api/auth/session',
-        authorization: 'Bearer dh_tokenvalue1234567890',
-        cookie: undefined,
-      }]);
+      // First the authoritative check with the Bearer token and no cookie...
+      assert.equal(mock.calls[0].url, 'https://default.example.com/api/auth/tokens');
+      assert.equal(mock.calls[0].authorization, `Bearer ${'dh_tokenvalue1234567890'}`);
+      assert.equal(mock.calls[0].cookie, undefined);
+      // ...then the optional session lookup for the user summary.
+      assert.equal(mock.calls[1].url, 'https://default.example.com/api/auth/session');
       // The token lands in the config file, masked only on stdout.
       const stored = JSON.parse(readFileSync(path, 'utf8'));
       assert.equal(stored.token, 'dh_tokenvalue1234567890');
       assert.equal(stored.baseUrl, 'https://default.example.com');
       const output = printed.join('\n');
       assert.match(output, /"auth": "token"/);
+      assert.match(output, /"tokenName": "ci"/);
       assert.match(output, /"username": "admin"/);
       assert.ok(!output.includes('dh_tokenvalue1234567890'), 'the full token is never printed');
     } finally {
@@ -638,6 +642,8 @@ test('login --token refuses to store a token the server rejects', async () => {
           && error.exitCode === 3
           && /rejected this API token/.test(error.message),
       );
+      // Rejection is decisive: no summary lookup follows.
+      assert.equal(mock.calls.length, 1);
       const stored = JSON.parse(readFileSync(path, 'utf8'));
       assert.equal(stored.token, undefined, 'a rejected token must not be persisted');
     } finally {

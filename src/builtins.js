@@ -322,7 +322,7 @@ async function login({ flags, settings }) {
  * reads the token from stdin so it never lands in shell history.
  */
 async function tokenLogin(tokenArg, settings) {
-  let token = tokenArg;
+  let token = tokenArg.trim();
   if (token === '-') token = readFileSync(0, 'utf8').trim();
   if (!token) {
     throw new CliError(
@@ -333,25 +333,36 @@ async function tokenLogin(tokenArg, settings) {
     );
   }
 
-  // Validate the token on its own (no cookie attached) so a stale stored
-  // session can never mask a broken token.
+  // Validate against an endpoint that actually requires auth. `/api/auth/session`
+  // is a public bootstrap route (security: []) whose `authenticated` flag does
+  // not reflect Bearer validity, so it would reject perfectly good tokens.
   const client = new Client({ ...settings, token, cookie: undefined });
-  let session;
+  let tokens;
   try {
-    session = await client.request({ method: 'GET', path: '/api/auth/session' });
+    tokens = await client.request({ method: 'GET', path: '/api/auth/tokens' });
   } catch (error) {
     if (error instanceof CliError && error.exitCode === EXIT.AUTH) {
-      throw new CliError(`the server rejected this API token — ${error.message}`, {
-        exitCode: EXIT.AUTH,
-        cause: error,
-      });
+      throw new CliError(
+        `the server rejected this API token — ${error.message}\n`
+        + '  the token may be revoked or expired; create a new one in the Dockhand web UI\n'
+        + '  (note: repeated failures are rate-limited — 10 per IP, then 429 for 5 minutes)',
+        { exitCode: EXIT.AUTH, cause: error },
+      );
     }
     throw error;
   }
-  if (session.data?.authenticated !== true) {
-    throw new CliError('the server did not accept this API token (/api/auth/session reports authenticated=false)', {
-      exitCode: EXIT.AUTH,
-    });
+
+  // Best-effort extras for the summary: which stored token this is, and who is
+  // logged in (only if the instance resolves the user for Bearer requests).
+  const list = Array.isArray(tokens.data) ? tokens.data : [];
+  const prefix = token.startsWith('dh_') ? token.slice(3, 11) : token.slice(0, 8);
+  const matched = list.find((entry) => entry?.tokenPrefix === prefix) ?? null;
+  let user = null;
+  try {
+    const session = await client.request({ method: 'GET', path: '/api/auth/session' });
+    if (session.data?.authenticated === true) user = session.data.user ?? null;
+  } catch {
+    // Display only — the token itself is already validated.
   }
 
   const saved = saveCredentials(settings, { token });
@@ -360,7 +371,9 @@ async function tokenLogin(tokenArg, settings) {
     success: true,
     instance: target ?? null,
     auth: 'token',
-    user: session.data?.user ?? null,
+    user,
+    tokenName: matched?.name ?? null,
+    tokenExpiresAt: matched?.expiresAt ?? null,
     configFile: saved.path,
     cookie: '(unchanged)',
     token: maskSecret(token),

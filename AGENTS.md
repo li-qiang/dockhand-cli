@@ -171,8 +171,10 @@ dockhand config set token dh_xxx
 dockhand logout
 ```
 
-- `login --token` 先用 `GET /api/auth/session` 校验 token（校验时不带 cookie），
-  通过后连同本次的 base URL 一起写进配置文件；`--token -` 从 stdin 读入。
+- `login --token` 先用 `GET /api/auth/tokens` 校验 token（该端点才真正评估 Bearer；
+  校验时不带 cookie），通过后连同本次的 base URL 一起写进配置文件；`--token -` 从
+  stdin 读入。注意 `/api/auth/session` 是公开 bootstrap 端点（`security: []`），
+  不能用来校验 Bearer token。
 - `--token` 与 `--username/--password/--mfa-token/--provider/--save-token` 互斥。
 - 服务端 `Set-Cookie: dockhand_session=…` 会被存进配置文件（0600 权限）。
 - 登录成功时若本次显式指定了 base URL（flag 或 env），顶层（或实例条目）会记录它。
