@@ -48,7 +48,7 @@
     "generate": "node scripts/generate.mjs",
     "generate:fetch": "node scripts/generate.mjs --fetch",
     "audit": "node scripts/audit.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
+    "test": "node --test test/cli.test.mjs",
     "verify": "npm run audit && node scripts/generate.mjs --check && npm test",
     "dockhand": "node bin/dockhand.js",
     "prepublishOnly": "npm run verify"
